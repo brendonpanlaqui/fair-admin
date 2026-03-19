@@ -12,6 +12,10 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 
 from pathlib import Path
 from django.urls import reverse_lazy
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,8 +24,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-er6pkwk&dvn5z3eh^hc^ev7ghna-4&kfojw)+0hr44hq0bq%y('
+SECRET_KEY = os.getenv('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -44,6 +47,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'dashboard',
     'rest_framework',
+    'rest_framework.authtoken',
 ]
 
 MIDDLEWARE = [
@@ -224,3 +228,19 @@ UNFOLD = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = True
+ALLOWED_HOSTS = ['192.168.8.38', 'localhost', '127.0.0.1', '*']
+
+# ==========================================
+# EMAIL CONFIGURATION (Local Testing)
+# ==========================================
+# This prints the email to your terminal instead of actually sending it.
+# When you go to production, you will change this to an SMTP backend (like SendGrid or AWS SES).
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.gmail.com'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+
+# Update these to pull from the .env file
+EMAIL_HOST_USER = os.getenv('EMAIL_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_PASS')
+DEFAULT_FROM_EMAIL = f"Fair App Team <{os.getenv('EMAIL_USER')}>"

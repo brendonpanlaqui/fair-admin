@@ -4,10 +4,10 @@ from .models import UserProfile, Tricycle, FareMatrix, Trip, Report
 
 @admin.register(UserProfile)
 class UserProfileAdmin(ModelAdmin):
-    list_display = ["user", "user_type", "auth_provider", "is_verified"]
-    list_filter = ["user_type", "auth_provider", "is_verified"]
+    list_display = ["user", "user_type", "auth_provider", "is_discount_verified"]
+    list_filter = ["user_type", "auth_provider", "is_discount_verified"]
     search_fields = ["user__email", "user__first_name", "user__last_name"]
-    list_editable = ["is_verified"] # Admins can click a checkbox right in the table
+    list_editable = ["is_discount_verified"] # Admins can click a checkbox right in the table
 
 @admin.register(Tricycle)
 class TricycleAdmin(ModelAdmin):

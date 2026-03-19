@@ -20,7 +20,9 @@ class UserProfile(models.Model):
     auth_provider = models.CharField(max_length=10, choices=AUTH_PROVIDERS, default='Local')
     user_type = models.CharField(max_length=10, choices=USER_TYPES, default='Regular')
     id_photo_url = models.URLField(blank=True, null=True, help_text="Link to uploaded CCA ID or PWD ID")
-    is_verified = models.BooleanField(default=False, help_text="Checked by Admin to approve discount")
+    is_discount_verified = models.BooleanField(default=False, help_text="Checked by Admin to approve discount")
+    is_email_verified = models.BooleanField(default=False)
+    email_otp = models.CharField(max_length=6, blank=True, null=True)
 
     def __str__(self):
         return f"{self.user.get_full_name() or self.user.username} - {self.user_type}"
