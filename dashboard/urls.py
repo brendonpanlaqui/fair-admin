@@ -11,6 +11,7 @@ urlpatterns = [
     path('api/auth/login/', views.mobile_login, name='api-login'),
     path('api/auth/register/', views.mobile_register, name='api-register'),
     path('api/auth/verify-otp/', views.verify_email_otp, name='api-verify-otp'),
+    path('api/auth/resend-otp/', views.resend_otp, name='api-resend-otp'),
     path('api/auth/forgot-password/', views.request_password_reset, name='api-forgot-password'),
     path('api/auth/reset-password/', views.reset_password, name='api-reset-password'),
 

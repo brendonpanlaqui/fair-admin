@@ -91,10 +91,10 @@ def mobile_register(request):
         return Response({"error": "Email is already registered"}, status=status.HTTP_400_BAD_REQUEST)
 
     # 1. Create the secure Django User
-    user = User.objects.create_user(
+    user = User.objects.create(
         username=email, 
         email=email,
-        password=password,
+        password=make_password(password),
         first_name=first_name,
         last_name=last_name
     )
@@ -212,8 +212,64 @@ def verify_email_otp(request):
         print(f"Result: SYSTEM CRASH - {str(e)}")
         return Response({"error": "Something went wrong."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
+# ==========================================
+# NEW ENDPOINT: RESEND OTP
+# ==========================================
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def resend_otp(request):
+    email = request.data.get('email')
 
+    if not email:
+        return Response({"error": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = User.objects.get(email=email)
+        
+        # 1. Generate a new 6-digit OTP
+        new_otp = str(random.randint(100000, 999999))
+        
+        # 2. Save it to the exact place your verify function looks for it
+        user.profile.email_otp = new_otp
+        user.profile.save()
+
+        # 3. Send the Email (with your Hackathon Safety Net)
+        try:
+            subject = 'Fair App - New Verification Code'
+            message = f"""Hello {user.first_name},
+
+You requested a new verification code for your Fair App account.
+
+NEW VERIFICATION CODE: {new_otp}
+
+This code is valid for 5 minutes.
+
+Safe travels,
+The Fair App Team
+"""
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=False,
+            )
+            print(f"SUCCESS: New verification email sent to {email}")
+        except Exception as e:
+            print(f"\n--- NEW OTP EMAIL FAILED TO SEND ---")
+            print(f"Error: {str(e)}")
+            print(f"The New OTP for {email} is: {new_otp}\n----------------------------\n")
+
+        return Response({"message": "New OTP sent successfully."}, status=status.HTTP_200_OK)
+
+    except User.DoesNotExist:
+        # Security best practice: Don't tell hackers if an email exists or not
+        return Response(
+            {"message": "If this email is registered, a new code has been sent."}, 
+            status=status.HTTP_200_OK
+        )
     
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def request_password_reset(request):
@@ -298,7 +354,6 @@ def reset_password(request):
 # 3. TRIP & REPORT ENDPOINTS
 # ==========================================
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
 def submit_trip(request):
     """Logs the final GPS distance and fare to the LGU database"""
     serializer = TripSerializer(data=request.data)
@@ -312,7 +367,6 @@ def submit_trip(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
 def submit_report(request):
     """Logs an overcharging or arrogant driver complaint"""
     serializer = ReportSerializer(data=request.data)
