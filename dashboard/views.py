@@ -12,6 +12,9 @@ from django.conf import settings
 # Import all your models and serializers
 from .models import FareMatrix, Trip, Report, UserProfile
 from .serializers import FareMatrixSerializer, TripSerializer, ReportSerializer
+from rest_framework.permissions import IsAuthenticated
+from .serializers import TripHistorySerializer
+from .serializers import ReportHistorySerializer
 
 # ==========================================
 # 1. FARE & ORDINANCE ENDPOINTS
@@ -88,10 +91,10 @@ def mobile_register(request):
         return Response({"error": "Email is already registered"}, status=status.HTTP_400_BAD_REQUEST)
 
     # 1. Create the secure Django User
-    user = User.objects.create(
+    user = User.objects.create_user(
         username=email, 
         email=email,
-        password=make_password(password),
+        password=password,
         first_name=first_name,
         last_name=last_name
     )
@@ -109,14 +112,28 @@ def mobile_register(request):
 
     # 4. "Send" the email (Will print to terminal for now)
     try:
+        subject = 'Welcome to Fair App - Verify Your Account'
+        message = f"""Hello {first_name},
+
+Welcome to the Fair App! We are excited to help you commute safely and fairly around Angeles City.
+
+To complete your registration and secure your account, please enter the following 6-digit verification code in the app:
+
+VERIFICATION CODE: {otp}
+
+This code is valid for 5 minutes. If you did not create this account, please ignore this email. 
+
+Safe travels,
+The Fair App Team
+"""
         send_mail(
-            subject='Verify your Fair App Account',
-            message=f'Hello {first_name},\n\nYour verification code is: {otp}\n\nPlease enter this in the app to verify your account.',
+            subject=subject,
+            message=message,
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[email],
             fail_silently=False,
         )
-        print(f"SUCCESS: Email sent to {email}")
+        print(f"SUCCESS: Verification email sent to {email}")
     except Exception as e:
         print(f"\n--- EMAIL FAILED TO SEND ---")
         print(f"Error: {str(e)}")
@@ -180,7 +197,9 @@ def verify_email_otp(request):
                 "status": "Verified",
                 "tokens": tokens,
                 "user_id": user.id,
-                "email": user.email
+                "email": user.email,
+                "first_name": user.first_name,  
+                "last_name": user.last_name
             }, status=status.HTTP_200_OK)
         else:
             print(f"Result: MISMATCH. '{app_otp_clean}' does not equal '{db_otp_clean}'")
@@ -192,6 +211,8 @@ def verify_email_otp(request):
     except Exception as e:
         print(f"Result: SYSTEM CRASH - {str(e)}")
         return Response({"error": "Something went wrong."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+
     
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -207,16 +228,31 @@ def request_password_reset(request):
 
         # Hackathon Safety Net
         try:
+            subject = 'Fair App - Password Reset Request'
+            message = f"""Hello,
+
+We received a request to reset the password for the Fair App account associated with this email address.
+
+Your password reset code is: {otp}
+
+Please enter this code in the app to proceed with creating a new password. For your security, do not share this code with anyone, including Fair App staff or PTRO officials.
+
+If you did not request this reset, your account is still secure, and you can safely ignore this email.
+
+Best regards,
+Fair App Security Team
+"""
             send_mail(
-                'Reset your Fair App Password',
-                f'Your password reset code is: {otp}',
-                settings.DEFAULT_FROM_EMAIL,
-                [email],
+                subject=subject,
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
                 fail_silently=False,
             )
         except Exception as e:
             print(f"\n--- FORGOT PASSWORD EMAIL FAILED ---")
-            print(f"HACKATHON FALLBACK -> Reset OTP for {email} is: {otp}\n")
+            print(f"Error: {str(e)}")
+            print(f"The Reset OTP for {email} is: {otp}\n----------------------------\n")
 
         # Security best practice: Always return a generic success message 
         # so hackers can't use this to guess registered emails.
@@ -262,6 +298,7 @@ def reset_password(request):
 # 3. TRIP & REPORT ENDPOINTS
 # ==========================================
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def submit_trip(request):
     """Logs the final GPS distance and fare to the LGU database"""
     serializer = TripSerializer(data=request.data)
@@ -275,14 +312,81 @@ def submit_trip(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def submit_report(request):
     """Logs an overcharging or arrogant driver complaint"""
     serializer = ReportSerializer(data=request.data)
     
     if serializer.is_valid():
-        serializer.save()
+        report = serializer.save()
+        
+        # 🚀 Send confirmation email to the user
+        try:
+            user = request.user
+            subject = f"Dispute Report Received - Ticket #{report.report_id}"
+            message = f"""Hello {user.first_name},
+
+This email confirms that your digital report regarding Tricycle Body #{report.trip.tricycle.body_number if report.trip else 'N/A'} has been received.
+
+TICKET ID: {report.report_id}
+VIOLATION: {report.violation_type}
+DATE FILED: {report.filed_at.strftime('%B %d, %Y %I:%M %p')}
+
+Your report has been securely transmitted to the LGU Admin Dashboard. The Public Transportation Regulatory Office (PTRO) will investigate this dispute using the GPS map-trace data provided by your app.
+
+You can track the live status of this ticket in the 'History' tab of your Fair App.
+
+Thank you for helping us maintain fair and safe commutes in Angeles City.
+
+Regards,
+Fair App Monitoring System
+"""
+            send_mail(
+                subject=subject,
+                message=message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=True, # fail silently so the app doesn't crash if email fails
+            )
+        except:
+            pass
+
         return Response(
             {"status": "Success", "message": "Violation report filed. TMO will review."}, 
             status=status.HTTP_201_CREATED
         )
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_trip_history(request):
+    """Fetches the ride history for the currently logged-in user"""
+    try:
+        # Get all trips belonging to the logged-in user, newest first
+        trips = Trip.objects.filter(user=request.user).order_by('-timestamp')
+        
+        # Serialize the data into the format React Native needs
+        serializer = TripHistorySerializer(trips, many=True)
+        
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except Exception as e:
+        print(f"Error fetching history: {str(e)}")
+        return Response(
+            {"error": "Failed to fetch trip history."}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_report_history(request):
+    """Fetches all filed complaints for the currently logged-in user"""
+    try:
+        reports = Report.objects.filter(user=request.user).order_by('-filed_at')
+        serializer = ReportHistorySerializer(reports, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except Exception as e:
+        print(f"Error fetching reports: {str(e)}")
+        return Response(
+            {"error": "Failed to fetch reports."}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )

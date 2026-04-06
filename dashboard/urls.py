@@ -13,4 +13,7 @@ urlpatterns = [
     path('api/auth/verify-otp/', views.verify_email_otp, name='api-verify-otp'),
     path('api/auth/forgot-password/', views.request_password_reset, name='api-forgot-password'),
     path('api/auth/reset-password/', views.reset_password, name='api-reset-password'),
+
+    path('api/trips/history/', views.get_trip_history, name='trip-history'),
+    path('api/reports/history/', views.get_report_history, name='api-report-history'),
 ]

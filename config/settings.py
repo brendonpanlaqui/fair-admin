@@ -243,4 +243,4 @@ EMAIL_USE_TLS = True
 # Update these to pull from the .env file
 EMAIL_HOST_USER = os.getenv('EMAIL_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_PASS')
-DEFAULT_FROM_EMAIL = f"Fair App Team <{os.getenv('EMAIL_USER')}>"
+DEFAULT_FROM_EMAIL = f"Fair App Support <{os.getenv('EMAIL_USER')}>"
