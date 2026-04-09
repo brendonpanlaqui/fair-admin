@@ -55,11 +55,18 @@ class FareMatrix(models.Model):
     updated_by_admin = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     is_active = models.BooleanField(default=True)
 
-    # 🚀 THIS IS THE MAGIC AUTOMATION:  
+    # 🚀 IMPROVED DISPLAY NAME
+    def __str__(self):
+        status = "ACTIVE" if self.is_active else "Archived"
+        date_str = self.effective_date.strftime('%b %d, %Y')
+        return f"₱{self.base_fare} Base - {status} ({date_str})"
+
+    class Meta:
+        verbose_name = "Tricycle Fare Ordinance"
+        verbose_name_plural = "Tricycle Fare Ordinances"
+
     def save(self, *args, **kwargs):
         if self.is_active:
-            # If the admin says THIS one is active, tell the database to instantly 
-            # find every other matrix and turn them OFF before saving.
             FareMatrix.objects.exclude(pk=self.pk).update(is_active=False)
         super().save(*args, **kwargs)
 # ==========================================
