@@ -6,8 +6,9 @@ from django.contrib.auth.admin import GroupAdmin as BaseGroupAdmin
 from unfold.admin import ModelAdmin
 from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 from .models import UserProfile, Tricycle, FareMatrix, Trip, Report
+from django import forms
+from django.contrib.admin.models import LogEntry
 
-# name='TODA' means everyone can see, unless they are TODA
 # ==========================================
 # 1. USER PROFILE ADMIN (LGU & Superadmin)
 # ==========================================
@@ -156,85 +157,125 @@ class ReportAdmin(ModelAdmin):
         return not request.user.groups.filter(name='TODA').exists()
 
 # ==========================================
-# 6. UNFOLD FIX FOR NATIVE USERS & GROUPS
+# 6. CUSTOM USER ADMIN (2-TIER STAFF MVP)
 # ==========================================
 admin.site.unregister(User)
 admin.site.unregister(Group)
 
+# 🚀 1. Strictly Staff Roles Only
+ROLE_CHOICES = [
+    ('lgu', 'LGU / PTRO Official (Web Portal Access)'),
+    ('superadmin', 'IT Developer (Full System Control)'),
+]
+
+class CustomUserForm(UserChangeForm):
+    account_role = forms.ChoiceField(
+        choices=ROLE_CHOICES,
+        widget=forms.RadioSelect,
+        help_text="Select the exact access level for this official."
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance.pk:
+            if self.instance.is_superuser:
+                self.fields['account_role'].initial = 'superadmin'
+            elif self.instance.is_staff:
+                self.fields['account_role'].initial = 'lgu'
+
 @admin.register(User)
 class UserAdmin(BaseUserAdmin, ModelAdmin):
-    form = UserChangeForm
+    form = CustomUserForm
     add_form = UserCreationForm
     change_password_form = AdminPasswordChangeForm
     filter_horizontal = ()
 
-    # 🚀 Renaming columns for the main list view
-    list_display = ("username", "email", "display_groups", "get_user_type", "is_staff")
+    list_display = ("username", "email", "get_custom_role", "is_active")
+    list_filter = ("is_staff", "is_superuser", "is_active")
     
-    # Custom Labels for the Table Header
-    def is_staff_status(self, obj): return obj.is_staff
-    is_staff_status.boolean = True
-    is_staff_status.short_description = 'Has Portal Access'
+    def get_custom_role(self, obj):
+        # 🚀 We still keep the passenger text here so if IT looks at the 
+        # main list, they can easily identify mobile users vs officials.
+        if obj.is_superuser: return "IT Developer"
+        if obj.is_staff: return "LGU Official"
+    get_custom_role.short_description = "System Role"
 
-    def display_groups(self, obj):
-        return ", ".join([group.name for group in obj.groups.all()])
-    display_groups.short_description = 'Official Role (LGU/TODA)'
-
-    def get_user_type(self, obj):
-        try: return obj.userprofile.user_type
-        except: return "Official"
-    get_user_type.short_description = 'Account Category'
-
-    # 🚀 BEAUTIFIED FORM LAYOUT
     fieldsets = (
-        ("Account Credentials", {
-            "fields": ("username", "password"),
-            "description": "The login details used to access the Fair ecosystem."
-        }),
-        ("Official's Information", {
-            "fields": ("first_name", "last_name", "email"),
-            "description": "Legal name and contact details of the officer or president."
-        }),
-        ("Permissions & Roles", {
-            "description": "Configure what this person is allowed to do within the Fair system.",
+        ("1. System Role & Access", {
             "fields": (
-                "is_active", 
-                "is_staff", # We'll label this 'Portal Access' via the form
-                "is_superuser", 
-                "groups",
+                "account_role", # 🚀 Moved to the very top!
+            ),
+        }),
+        ("2. Account Credentials", {
+            "description": "The login details used to access the Fair web portal.",
+            "fields": ("username", "password")
+        }),
+        ("3. Official's Information", {
+            "description": "Legal name and contact details of the officer.",
+            "fields": ("first_name", "last_name", "email")
+        }),
+        ("4. Account Status", {
+            "fields": (
+                "is_active", # 🚀 Tucked safely at the bottom
             ),
         }),
     )
 
-    # 🚀 THE "SECRET SAUCE": Changing the labels on the fly
-    def get_form(self, request, obj=None, **kwargs):
-        form = super().get_form(request, obj, **kwargs)
-        if "is_staff" in form.base_fields:
-            form.base_fields["is_staff"].label = "Grant Web Portal Access"
-            form.base_fields["is_staff"].help_text = "Check this ONLY for LGU Officials or TODA Presidents."
-        if "is_superuser" in form.base_fields:
-            form.base_fields["is_superuser"].label = "Developer / IT Admin Status"
-            form.base_fields["is_superuser"].help_text = "Grants total control over the entire system (IT only)."
-        if "is_active" in form.base_fields:
-            form.base_fields["is_active"].label = "Account is Active"
-        if "groups" in form.base_fields:
-            form.base_fields["groups"].label = "Assigned Official Group"
-        return form
+    def save_model(self, request, obj, form, change):
+        role = form.cleaned_data.get('account_role')
+        
+        # 🚀 Enforce the exact boolean flags based on the single radio selection
+        if role == 'superadmin':
+            obj.is_staff = True
+            obj.is_superuser = True
+        elif role == 'lgu':
+            obj.is_staff = True
+            obj.is_superuser = False
+            
+        super().save_model(request, obj, form, change)
 
-    def has_module_permission(self, request):
-        return request.user.is_superuser
-    def has_view_permission(self, request, obj=None):
-        return request.user.is_superuser
-    def has_change_permission(self, request, obj=None):
-        return request.user.is_superuser
+    # Only IT can see the user management screen
+    def has_module_permission(self, request): return request.user.is_superuser
+    def has_view_permission(self, request, obj=None): return request.user.is_superuser
+    def has_change_permission(self, request, obj=None): return request.user.is_superuser
 
-@admin.register(Group)
-class GroupAdmin(BaseGroupAdmin, ModelAdmin):
-    fields = ('name',)
+# ==========================================
+# 7. GLOBAL AUDIT LOGS (SUPERADMIN ONLY)
+# ==========================================
+@admin.register(LogEntry)
+class LogEntryAdmin(ModelAdmin):
+    # 1. Reordered for a natural reading flow (When -> Who -> What -> Action)
+    list_display = ['action_time', 'user', 'get_content_type', 'get_object_repr', 'get_action']
+    list_filter = ['action_flag', 'user', 'content_type']
     
-    def has_module_permission(self, request):
-        return request.user.is_superuser
-    def has_view_permission(self, request, obj=None):
-        return request.user.is_superuser
-    def has_change_permission(self, request, obj=None):
-        return request.user.is_superuser
+    # Expanded search to include email just in case usernames are forgotten
+    search_fields = ['user__username', 'user__email', 'object_repr', 'change_message']
+    date_hierarchy = 'action_time'
+
+    # 2. Translating Django jargon into clear IT terms
+    def get_content_type(self, obj):
+        if obj.content_type:
+            return obj.content_type.name.title()
+        return "Unknown"
+    get_content_type.short_description = "System Module"
+
+    def get_object_repr(self, obj):
+        return obj.object_repr
+    get_object_repr.short_description = "Record Affected"
+
+    # 3. Professional, emoji-free action labels
+    def get_action(self, obj):
+        if obj.action_flag == 1: return "Created"
+        if obj.action_flag == 2: return "Updated"
+        if obj.action_flag == 3: return "Deleted"
+        return "Unknown"
+    get_action.short_description = "Action Performed"
+
+    # 4. SECURITY: STRICTLY READ-ONLY
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def has_delete_permission(self, request, obj=None): return False
+    
+    # 5. Only IT Developer can view the logs
+    def has_view_permission(self, request, obj=None): return request.user.is_superuser
+    def has_module_permission(self, request): return request.user.is_superuser

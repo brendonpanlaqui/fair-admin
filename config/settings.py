@@ -121,7 +121,7 @@ from django.templatetags.static import static
 # ==========================================
 UNFOLD = {
     "SITE_TITLE": "Fair Admin",
-    "SITE_HEADER": "Angeles City LGU / TODA Portal",
+    "SITE_HEADER": "FAIR ADMIN",
     "SITE_SYMBOL": "two_wheeler",
     "SITE_URL": None,
     "ENVIRONMENT": "Fair System MVP", 
@@ -155,22 +155,16 @@ UNFOLD = {
                         "title": "Dashboard",
                         "icon": "dashboard",
                         "link": reverse_lazy("admin:index"),
-                        # Dashboard is visible to everyone
-                        "permission": lambda request: True, 
                     },
                     {
                         "title": "Tricycle Registry",
                         "icon": "commute",
                         "link": reverse_lazy("admin:dashboard_tricycle_changelist"), 
-                        # Registry is visible to everyone
-                        "permission": lambda request: True, 
                     },
                     {
                         "title": "Trip Records",
                         "icon": "route",
                         "link": reverse_lazy("admin:dashboard_trip_changelist"), 
-                        # 🚀 HIDDEN FROM TODA
-                        "permission": lambda request: not request.user.groups.filter(name='TODA').exists(),
                     },
                 ],
             },
@@ -182,15 +176,11 @@ UNFOLD = {
                         "title": "Dispute Reports", 
                         "icon": "report",
                         "link": reverse_lazy("admin:dashboard_report_changelist"), 
-                        # 🚀 HIDDEN FROM TODA
-                        "permission": lambda request: not request.user.groups.filter(name='TODA').exists(),
                     },
                     {
                         "title": "Commuter Profiles", 
                         "icon": "group",
                         "link": reverse_lazy("admin:dashboard_userprofile_changelist"),
-                        # 🚀 HIDDEN FROM TODA
-                        "permission": lambda request: not request.user.groups.filter(name='TODA').exists(),
                     },
                 ],
             },
@@ -202,8 +192,6 @@ UNFOLD = {
                         "title": "Fare Matrix (Ordinance)", 
                         "icon": "request_quote",
                         "link": reverse_lazy("admin:dashboard_farematrix_changelist"),
-                        # 🚀 HIDDEN FROM TODA
-                        "permission": lambda request: not request.user.groups.filter(name='TODA').exists(),
                     },
                 ],
             },
@@ -215,13 +203,13 @@ UNFOLD = {
                         "title": "Users", 
                         "icon": "person",
                         "link": reverse_lazy("admin:auth_user_changelist"),
-                        # Only Superadmins should be able to create accounts
+                        # 🚀 KEEP THIS: Only IT/Superadmins should manage accounts
                         "permission": lambda request: request.user.is_superuser,
                     },
                     {
-                        "title": "Groups (Roles)", 
-                        "icon": "admin_panel_settings",
-                        "link": reverse_lazy("admin:auth_group_changelist"),
+                        "title": "Logs", 
+                        "icon": "history",
+                        "link": reverse_lazy("admin:admin_logentry_changelist"), 
                         "permission": lambda request: request.user.is_superuser,
                     },
                 ],
