@@ -8,6 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import random
 from django.core.mail import send_mail
 from django.conf import settings
+from django.utils import timezone
 
 # Import all your models and serializers
 from .models import FareMatrix, Trip, Report, UserProfile
@@ -444,3 +445,20 @@ def get_report_history(request):
             {"error": "Failed to fetch reports."}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+    
+
+def unfold_dashboard_callback(request, context):
+    today = timezone.now().date()
+    
+    active_matrix = FareMatrix.objects.filter(is_active=True).first()
+    pending_reports = Report.objects.filter(status='Pending')
+    
+    context['is_super'] = request.user.is_superuser
+    context['pending_reports_count'] = pending_reports.count()
+    context['resolved_today_count'] = Report.objects.filter(status='Resolved', filed_at__date=today).count()
+    context['trips_today_count'] = Trip.objects.filter(timestamp__date=today).count()
+    context['active_matrix'] = active_matrix
+    context['priority_reports'] = pending_reports.order_by('-filed_at')[:3]
+    context['recent_trips'] = Trip.objects.all().order_by('-timestamp')[:5]
+
+    return context
