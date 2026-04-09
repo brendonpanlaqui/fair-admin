@@ -8,6 +8,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 import random
 from django.core.mail import send_mail
 from django.conf import settings
+from django.utils import timezone
 
 # Import all your models and serializers
 from .models import FareMatrix, Trip, Report, UserProfile
@@ -444,3 +445,48 @@ def get_report_history(request):
             {"error": "Failed to fetch reports."}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+    
+
+# ==========================================
+# 4. WEB DASHBOARD CALLBACK (UNFOLD ADMIN)
+# ==========================================
+def unfold_dashboard_callback(request, context):
+    """
+    This function intercepts Unfold's dashboard rendering and injects 
+    our custom variables (pending_reports, active_matrix, etc.) based on user roles.
+    """
+    today = timezone.now().date()
+    user = request.user
+    
+    # 1. Identify the user's role
+    is_super = user.is_superuser
+    is_toda = user.groups.filter(name='TODA').exists()
+
+    # 2. Add roles to the context so HTML knows what to hide/show
+    context['is_super'] = is_super
+    context['is_toda'] = is_toda
+
+    # 3. Fetch data specifically for TODA
+    if is_toda:
+        # In a future update, you can filter this by user.toda_branch
+        toda_trikes = Tricycle.objects.all() 
+        context['toda_data'] = {
+            'active': toda_trikes.filter(status='active').count(),
+            'inactive': toda_trikes.filter(status='inactive').count(),
+            'suspended': toda_trikes.filter(status='suspended').count(),
+            'tricycles': toda_trikes[:10] # Grab the latest 10 tricycles for the table
+        }
+
+    # 4. Fetch data for LGU and Superadmin
+    else:
+        active_matrix = FareMatrix.objects.filter(is_active=True).first()
+        pending_reports = Report.objects.filter(status='Pending')
+        
+        context['pending_reports_count'] = pending_reports.count()
+        context['resolved_today_count'] = Report.objects.filter(status='Resolved', filed_at__date=today).count()
+        context['trips_today_count'] = Trip.objects.filter(timestamp__date=today).count()
+        context['active_matrix'] = active_matrix
+        context['priority_reports'] = pending_reports.order_by('-filed_at')[:3]
+        context['recent_trips'] = Trip.objects.all().order_by('-timestamp')[:5]
+
+    return context
