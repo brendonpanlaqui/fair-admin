@@ -22,7 +22,7 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 DEBUG = True
 
 # 🚀 CLEANED UP: Combined your ALLOWED_HOSTS here
-ALLOWED_HOSTS = ['192.168.8.38', 'localhost', '127.0.0.1', '*']
+ALLOWED_HOSTS = ['192.168.8.38', 'localhost', '127.0.0.1', "http://10.0.2.2:8000", '*']
 CORS_ALLOW_ALL_ORIGINS = True
 
 # Application definition
@@ -75,8 +75,12 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('DB_NAME'),
+        'USER': os.getenv('DB_USER'),
+        'PASSWORD': os.getenv('DB_PASSWORD'),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
 
@@ -113,6 +117,9 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'static'),
 ]
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 from django.templatetags.static import static
 
@@ -201,7 +208,7 @@ UNFOLD = {
                 "items": [
                     {
                         "title": "Users", 
-                        "icon": "person",
+                        "icon": "manage_accounts",
                         "link": reverse_lazy("admin:auth_user_changelist"),
                         # 🚀 KEEP THIS: Only IT/Superadmins should manage accounts
                         "permission": lambda request: request.user.is_superuser,

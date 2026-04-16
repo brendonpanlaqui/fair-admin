@@ -17,4 +17,7 @@ urlpatterns = [
 
     path('api/trips/history/', views.get_trip_history, name='trip-history'),
     path('api/reports/history/', views.get_report_history, name='api-report-history'),
+
+    path('api/users/verify-id/', views.submit_id_verification, name='api-verify-id'),
+    path('api/users/me/', views.get_user_profile, name='api-get-profile'),
 ]

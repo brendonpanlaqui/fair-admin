@@ -8,16 +8,77 @@ from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationFo
 from .models import UserProfile, Tricycle, FareMatrix, Trip, Report
 from django import forms
 from django.contrib.admin.models import LogEntry
+from django.urls import reverse
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe  # 🚀 Added this import for the UI previews
 
 # ==========================================
 # 1. USER PROFILE ADMIN (LGU & Superadmin)
 # ==========================================
 @admin.register(UserProfile)
 class UserProfileAdmin(ModelAdmin):
-    list_display = ["user", "user_type", "auth_provider", "is_discount_verified"]
-    list_filter = ["user_type", "auth_provider", "is_discount_verified"]
-    search_fields = ["user__email", "user__first_name", "user__last_name"]
-    list_editable = ["is_discount_verified"]
+    list_display = ('get_full_name', 'user_type', 'auth_provider', 'is_discount_verified', 'id_photo_preview', 'action_button')
+    list_filter = ('is_discount_verified', 'user_type', 'auth_provider')
+    search_fields = ('user__email', 'user__first_name', 'user__last_name')
+    
+    # 🚀 THE UPGRADE: Make user_type a quick-select radio button
+    radio_fields = {"user_type": admin.HORIZONTAL}
+
+    # 1. Custom Image Preview (Forced ID Card Aspect Ratio)
+    def id_photo_preview(self, obj):
+        if obj.id_photo_url:
+            return mark_safe(f'''
+                <a href="{obj.id_photo_url}" target="_blank">
+                    <img src="{obj.id_photo_url}" 
+                         style="width: 100px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid #E2E8F0; box-shadow: 0 2px 4px rgba(0,0,0,0.1);" 
+                         alt="ID Photo"/>
+                </a>
+            ''')
+        return mark_safe('<span style="color: #94A3B8; font-style: italic;">No ID Uploaded</span>')
+    id_photo_preview.short_description = "ID Document"
+
+    # 2. Get the commuter's real name or email
+    def get_full_name(self, obj):
+        full_name = obj.user.get_full_name()
+        return full_name if full_name else obj.user.email
+    get_full_name.short_description = "Commuter Name"
+
+    # 3. The UX Action Button
+    def action_button(self, obj):
+        url = reverse('admin:dashboard_userprofile_change', args=[obj.pk])
+        
+        if obj.id_photo_url and not obj.is_discount_verified:
+            return mark_safe(f'<a href="{url}" style="background-color: #EF4444; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Verify ID &rarr;</a>')
+        elif obj.is_discount_verified:
+            return mark_safe(f'<a href="{url}" style="background-color: #10B981; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Verified ✔</a>')
+        else:
+            return mark_safe(f'<a href="{url}" style="background-color: #E2E8F0; color: #475569; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">View User</a>')
+    action_button.short_description = "Action"
+
+    # 4. Make the form look clean when they click into it
+    fieldsets = (
+        ("Commuter Account Details", {
+            # 🚀 Moved user_type out of this section
+            "fields": ('user', 'auth_provider', 'is_email_verified'),
+            "classes": ["tab"],
+        }),
+        ("Discount Verification Center", {
+            # 🚀 Moved user_type INTO this section, right above the verification checkbox
+            "fields": ('user_type', 'is_discount_verified', 'id_photo_url'),
+            "classes": ["tab"],
+            "description": mark_safe(
+                '<div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 mt-2">'
+                '<p class="text-amber-800 font-bold mb-2 uppercase tracking-wider text-sm">⚠️ ID Verification Guidelines</p>'
+                '<ol class="text-amber-700 text-xs list-decimal ml-4 space-y-1">'
+                '<li>Review the uploaded ID document carefully.</li>'
+                '<li><b>Confirm or Correct the User Type</b> using the buttons below to match the physical ID.</li>'
+                '<li>Check the "Is discount verified" box to permanently activate their 20% fare discount.</li>'
+                '</ol>'
+                '</div>'
+            )
+        }),
+    )
+    readonly_fields = ('user', 'auth_provider', 'id_photo_url')
 
     def has_module_permission(self, request):
         return not request.user.groups.filter(name='TODA').exists()
@@ -27,6 +88,7 @@ class UserProfileAdmin(ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return not request.user.groups.filter(name='TODA').exists()
+
 
 # ==========================================
 # 2. TRICYCLE ADMIN (Shared Access)
@@ -141,11 +203,58 @@ class TripAdmin(ModelAdmin):
 # ==========================================
 @admin.register(Report)
 class ReportAdmin(ModelAdmin):
-    list_display = ["report_id", "violation_type", "trip", "status", "filed_at"]
-    list_filter = ["status", "violation_type", "filed_at"]
-    search_fields = ["report_id", "user__email", "trip__tricycle__body_number"]
-    list_editable = ["status"] 
-    date_hierarchy = "filed_at"
+    # 1. Add 'review_action' to the very end of your list_display
+    list_display = ('report_id', 'violation_type', 'get_body_number', 'status', 'filed_at', 'review_action')
+    
+    # 2. Make multiple columns clickable so they don't have to guess
+    list_display_links = ('report_id', 'violation_type', 'get_body_number')
+    
+    list_filter = ('status', 'violation_type')
+    search_fields = ('report_id', 'manual_body_number', 'trip__tricycle__body_number')
+    radio_fields = {"status": admin.HORIZONTAL}
+    fieldsets = (
+        ("Commuter Complaint (Read-Only)", {
+            "fields": ('report_id', 'user', 'trip', 'manual_body_number', 'violation_type', 'passenger_comments', 'filed_at'),
+            "classes": ["tab"],
+        }),
+        ("PTRO Action Center", {
+            "fields": ('status', 'admin_response'),
+            "classes": ["tab"],
+            "description": mark_safe(
+                '<div class="text-center bg-blue-50 border border-blue-100 rounded-xl p-4 mb-6 mt-2 dark:bg-blue-900/20 dark:border-blue-800">'
+                '<p class="text-blue-700 font-black text-sm mb-1 uppercase tracking-wider dark:text-blue-400">⚠️ Official Resolution Portal</p>'
+                '<p class="text-slate-600 text-xs font-medium dark:text-slate-400">Select the new status below and type your response. This will be sent directly to the commuter\'s mobile application.</p>'
+                '</div>'
+            )
+        }),
+    )
+
+    readonly_fields = ('report_id', 'user', 'trip', 'manual_body_number', 'violation_type', 'passenger_comments', 'filed_at')
+
+    def get_body_number(self, obj):
+        if obj.trip and obj.trip.tricycle:
+            return f"Trip: {obj.trip.tricycle.body_number}"
+        return f"Manual: {obj.manual_body_number}"
+    get_body_number.short_description = "Tricycle Body #"
+
+    # 3. THIS IS THE MAGIC UX BUTTON
+    def review_action(self, obj):
+        # Generate the correct URL to edit this specific report
+        url = reverse('admin:dashboard_report_change', args=[obj.pk])
+        
+        # If it is pending, show a bright red call-to-action button
+        if obj.status == 'Pending' or obj.status == 'Investigating':
+            return format_html(
+                '<a href="{}" style="background-color: #EF4444; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block; box-shadow: 0 2px 4px rgba(239,68,68,0.2);">Review Dispute &rarr;</a>',
+                url
+            )
+        # If it is resolved, show a quiet gray button
+        else:
+            return format_html(
+                '<a href="{}" style="background-color: #E2E8F0; color: #475569; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">View Details</a>',
+                url
+            )
+    review_action.short_description = "Action"
 
     def has_module_permission(self, request):
         return not request.user.groups.filter(name='TODA').exists()
@@ -198,6 +307,7 @@ class UserAdmin(BaseUserAdmin, ModelAdmin):
         # main list, they can easily identify mobile users vs officials.
         if obj.is_superuser: return "IT Developer"
         if obj.is_staff: return "LGU Official"
+        return "Commuter (Mobile App)" 
     get_custom_role.short_description = "System Role"
 
     fieldsets = (

@@ -17,6 +17,10 @@ from rest_framework.permissions import IsAuthenticated
 from .serializers import TripHistorySerializer
 from .serializers import ReportHistorySerializer
 
+from django.core.files.storage import default_storage
+from django.conf import settings
+import uuid
+
 # ==========================================
 # 1. FARE & ORDINANCE ENDPOINTS
 # ==========================================
@@ -447,6 +451,75 @@ def get_report_history(request):
         )
     
 
+# ==========================================
+# 4. USER PROFILE & VERIFICATION
+# ==========================================
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def submit_id_verification(request):
+    user = request.user
+    
+    # 1. Grab data from the multipart/form-data request
+    discount_type = request.data.get('discount_type') 
+    id_photo = request.FILES.get('id_photo')
+
+    if not discount_type or not id_photo:
+        return Response({"error": "Missing ID type or photo."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # 2. Map the React Native tags to your Django choices
+    type_mapping = {
+        'student': 'Student',
+        'senior': 'Senior',
+        'pwd': 'PWD'
+    }
+    mapped_type = type_mapping.get(discount_type, 'Regular')
+
+    try:
+        profile = user.profile
+
+        # 3. Securely save the file with a unique name to avoid overwriting
+        # Example: id_photos/user_5_9b2a1c_id_photo.jpg
+        unique_filename = f"id_photos/user_{user.id}_{uuid.uuid4().hex[:6]}_{id_photo.name}"
+        saved_path = default_storage.save(unique_filename, id_photo)
+        
+        # 4. Generate the full URL so it renders properly in the Unfold Admin panel
+        file_url = request.build_absolute_uri(settings.MEDIA_URL + saved_path)
+
+        # 5. Update the user's profile
+        profile.user_type = mapped_type
+        profile.id_photo_url = file_url
+        profile.is_discount_verified = False # Ensures LGU admin must manually approve it
+        profile.save()
+
+        return Response({
+            "status": "Success",
+            "message": "ID submitted successfully for LGU review."
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"Error saving ID upload: {str(e)}")
+        return Response({"error": "Failed to upload ID to server."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_user_profile(request):
+    """Fetches the user's current profile, including their verification status."""
+    try:
+        user = request.user
+        profile = user.profile
+        
+        return Response({
+            "user_id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "user_type": profile.user_type, # e.g., 'Student', 'Senior', 'Regular'
+            "is_discount_verified": profile.is_discount_verified, # True or False!
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({"error": "Failed to fetch profile."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
 def unfold_dashboard_callback(request, context):
     today = timezone.now().date()
     
@@ -462,3 +535,5 @@ def unfold_dashboard_callback(request, context):
     context['recent_trips'] = Trip.objects.all().order_by('-timestamp')[:5]
 
     return context
+
+

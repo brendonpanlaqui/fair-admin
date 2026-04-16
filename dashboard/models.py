@@ -132,12 +132,9 @@ class Report(models.Model):
     
     manual_body_number = models.CharField(max_length=10, blank=True, null=True, help_text="Used when trip is not linked to the app")
     violation_type = models.CharField(max_length=20, choices=VIOLATION_TYPES)
-    passenger_comments = models.TextField()
-    evidence_photo_url = models.URLField(blank=True, null=True)
-    
+    passenger_comments = models.TextField(blank=True, null=True, help_text="The complaint details from the commuter.")    
     status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='Pending')
-    admin_remarks = models.TextField(blank=True, null=True)
-    
+    admin_response = models.TextField(blank=True, null=True, help_text="Official PTRO resolution sent back to the commuter.")    
     filed_at = models.DateTimeField(auto_now_add=True)
     resolved_at = models.DateTimeField(blank=True, null=True)
 
