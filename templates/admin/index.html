@@ -19,9 +19,10 @@
             <p class="text-sm text-gray-500 tmo-text-sub mt-1">Fare Matrix Compliance &amp; Dispute Management System</p>
         </div>
         {% if is_super %}
-        <span class="bg-purple-100 text-purple-800 text-xs font-bold px-3 py-1.5 rounded-full" style="background:#f3e8ff;color:#7e22ce;">
-            Superadmin Mode
-        </span>
+        <span class="bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-bold px-3 py-1.5 rounded-md flex items-center">
+            <span class="w-2 h-2 rounded-full bg-blue-500 mr-2 animate-pulse"></span>
+                Superadmin Mode
+            </span>
         {% endif %}
     </div>
 
@@ -120,9 +121,14 @@
                             {% if trip.actual_fare_charged > trip.computed_fare %}
                                 <p class="text-sm font-bold text-red-600">₱{{ trip.actual_fare_charged }}</p>
                                 <p class="text-xs text-red-400">⚠ Overcharged</p>
+
+                            {% elif trip.actual_fare_charged < trip.computed_fare %}
+                                <p class="text-sm font-bold text-blue-600">₱{{ trip.actual_fare_charged }}</p>
+                                <p class="text-xs text-blue-400">↓ Below Ordinance</p>
+
                             {% else %}
                                 <p class="text-sm font-bold text-green-600">₱{{ trip.actual_fare_charged }}</p>
-                                <p class="text-xs text-gray-400 tmo-text-sub">Paid correctly</p>
+                                <p class="text-xs text-gray-400 tmo-text-sub">✔ Paid correctly</p>
                             {% endif %}
                         </div>
                     </li>
@@ -136,19 +142,5 @@
             </div>
         </div>
     </div>
-
-    {# ── Superadmin-only: Quick Links Row ─────────────────────────── #}
-    {% if is_super %}
-    <div class="mt-6 bg-purple-50 rounded-xl border border-purple-200 p-5" style="background:#faf5ff;border-color:#e9d5ff;">
-        <h3 class="text-sm font-bold text-purple-800 mb-3 flex items-center" style="color:#6b21a8;">
-            <span class="material-symbols-outlined mr-2" style="font-size:18px;">admin_panel_settings</span> Superadmin Quick Access
-        </h3>
-        <div class="flex flex-wrap gap-3">
-            <a href="{% url 'admin:auth_user_changelist' %}" class="text-xs font-bold bg-white border border-purple-300 text-purple-700 px-3 py-2 rounded-lg hover:bg-purple-100 transition" style="color:#7e22ce;border-color:#d8b4fe;">👥 Manage Officials</a>
-            <a href="{% url 'admin:dashboard_farematrix_changelist' %}" class="text-xs font-bold bg-white border border-purple-300 text-purple-700 px-3 py-2 rounded-lg hover:bg-purple-100 transition" style="color:#7e22ce;border-color:#d8b4fe;">📋 Fare Matrix</a>
-            <a href="{% url 'admin:dashboard_userprofile_changelist' %}" class="text-xs font-bold bg-white border border-purple-300 text-purple-700 px-3 py-2 rounded-lg hover:bg-purple-100 transition" style="color:#7e22ce;border-color:#d8b4fe;">🛂 Verify Discounts</a>
-        </div>
-    </div>
-    {% endif %}
 </div>
 {% endblock %}
