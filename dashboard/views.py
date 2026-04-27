@@ -1,51 +1,65 @@
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework import status
+import uuid
+import random
+
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password
-from rest_framework_simplejwt.tokens import RefreshToken
-import random
 from django.core.mail import send_mail
-from django.conf import settings
+from django.core.files.storage import default_storage
 from django.utils import timezone
 
-# Import all your models and serializers
-from .models import FareMatrix, Trip, Report, UserProfile
-from .serializers import FareMatrixSerializer, TripSerializer, ReportSerializer
-from rest_framework.permissions import IsAuthenticated
-from .serializers import TripHistorySerializer
-from .serializers import ReportHistorySerializer
+from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
 
-from django.core.files.storage import default_storage
-from django.conf import settings
-import uuid
+from rest_framework_simplejwt.tokens import RefreshToken
 
-# ==========================================
-# 1. FARE & ORDINANCE ENDPOINTS
-# ==========================================
-@api_view(['GET'])
-def get_active_fare(request):
-    try:
-        # Ask the database for the ONE row where is_active is True
-        active_matrix = FareMatrix.objects.get(is_active=True)
-        
-        # Translate it to JSON
-        serializer = FareMatrixSerializer(active_matrix)
-        
-        # Send it to the mobile app
-        return Response(serializer.data, status=status.HTTP_200_OK)
-        
-    except FareMatrix.DoesNotExist:
-        # Safety net: If the Admin forgot to set an active matrix
-        return Response(
-            {"error": "No active fare matrix found in the system. Contact LGU."}, 
-            status=status.HTTP_404_NOT_FOUND
-        )
+from .models import (
+    FareMatrix, 
+    Trip, 
+    Report, 
+    UserProfile, 
+    Tricycle
+)
+from .serializers import (
+    FareMatrixSerializer, 
+    TripSerializer, 
+    ReportSerializer, 
+    ReportHistorySerializer, 
+    TripHistorySerializer, 
+    UserUpdateSerializer, 
+    ChangePasswordSerializer
+)
 
-# ==========================================
-# 2. AUTHENTICATION ENDPOINTS (JWT)
-# ==========================================
+# ADMIN DASHBOARD & UI HELPERS
+# data rendering for Unfold
+def pending_reports_badge(request):
+    """Returns the count of pending reports for the admin sidebar badge."""
+    count = Report.objects.filter(status='Pending').count()
+    return str(count) if count > 0 else None 
+
+def unfold_dashboard_callback(request, context):
+    """Populates the custom dashboard view in the Unfold admin panel."""
+    today = timezone.now().date()
+    
+    active_matrix = FareMatrix.objects.filter(is_active=True).first()
+    pending_reports = Report.objects.filter(status='Pending')
+    
+    context['is_super'] = request.user.is_superuser
+    context['pending_reports_count'] = pending_reports.count()
+    context['resolved_today_count'] = Report.objects.filter(status='Resolved', filed_at__date=today).count()
+    context['trips_today_count'] = Trip.objects.filter(timestamp__date=today).count()
+    context['active_matrix'] = active_matrix
+    context['priority_reports'] = pending_reports.order_by('-filed_at')[:3]
+    context['recent_trips'] = Trip.objects.all().order_by('-timestamp')[:5]
+
+    return context
+
+
+# AUTHENTICATION & SECURITY ENDPOINTS (JWT)
+# handles login, registration, OTP verification, and password management
 def get_tokens_for_user(user):
     """Helper function to generate secure tokens"""
     refresh = RefreshToken.for_user(user)
@@ -55,8 +69,9 @@ def get_tokens_for_user(user):
     }
 
 @api_view(['POST'])
-@permission_classes([AllowAny]) # Allows users to log in without a token
+@permission_classes([AllowAny]) # allows users to log in without a token
 def mobile_login(request):
+    """Authenticates a user and returns JWT tokens."""
     email = request.data.get('email')
     password = request.data.get('password')
 
@@ -66,6 +81,14 @@ def mobile_login(request):
     try:
         user = User.objects.get(email=email)
         if user.check_password(password):
+            if not user.profile.is_email_verified:
+                return Response({
+                    "error": "Account not verified. Please check your email for the OTP.",
+                    "requires_otp": True, 
+                    "email": email 
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # if verified, issue tokens as normal
             tokens = get_tokens_for_user(user)
             return Response({
                 "status": "Success",
@@ -84,6 +107,7 @@ def mobile_login(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def mobile_register(request):
+    """Registers a new user, creates a profile, and sends an OTP."""
     email = request.data.get('email')
     password = request.data.get('password')
     first_name = request.data.get('first_name', '')
@@ -95,7 +119,7 @@ def mobile_register(request):
     if User.objects.filter(email=email).exists():
         return Response({"error": "Email is already registered"}, status=status.HTTP_400_BAD_REQUEST)
 
-    # 1. Create the secure Django User
+    # secured user
     user = User.objects.create(
         username=email, 
         email=email,
@@ -104,10 +128,10 @@ def mobile_register(request):
         last_name=last_name
     )
     
-    # 2. Generate a 6-digit OTP
+    # generate a 6-digit OTP
     otp = str(random.randint(100000, 999999))
 
-    # 3. Create the linked Profile with the OTP
+    # create the linked Profile with the OTP
     UserProfile.objects.create(
         user=user, 
         user_type='Regular',
@@ -115,7 +139,7 @@ def mobile_register(request):
         is_email_verified=False
     )
 
-    # 4. "Send" the email (Will print to terminal for now)
+    # send the email
     try:
         subject = 'Welcome to Fair App - Verify Your Account'
         message = f"""Hello {first_name},
@@ -144,24 +168,19 @@ The Fair App Team
         print(f"Error: {str(e)}")
         print(f"The OTP for {email} is: {otp}\n----------------------------\n")
 
-    # 5. Always return success if the user was created in the database
+    # always return success if the user was created in the database
     return Response({
         "status": "Account Created",
         "message": "Please check your email for the verification code."
     }, status=status.HTTP_201_CREATED)
 
-
-# ==========================================
-# NEW ENDPOINT: VERIFY OTP
-# ==========================================
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def verify_email_otp(request):
-    # 1. Grab the data from React Native
+    """Verifies the OTP sent to the user during registration."""
     email = request.data.get('email')
     otp = request.data.get('otp')
 
-    # X-RAY DEBUGGING: Print exactly what we received to the terminal
     print(f"\n--- OTP VERIFICATION ATTEMPT ---")
     print(f"Email from App: '{email}'")
     print(f"OTP from App: '{otp}'")
@@ -174,7 +193,7 @@ def verify_email_otp(request):
 
         if profile.is_email_verified:
             print("Result: ALREADY VERIFIED (Issuing tokens anyway)")
-            # Issue the login tokens even if they double-tapped!
+            # issue the login tokens even if they double-tapped!
             tokens = get_tokens_for_user(user)
             return Response({
                 "status": "Verified",
@@ -185,7 +204,8 @@ def verify_email_otp(request):
                 "first_name": user.first_name,  
                 "last_name": user.last_name
             }, status=status.HTTP_200_OK)
-        # 2. BULLETPROOF CHECK: Force both to be strings and strip any invisible spaces
+            
+        # strings and strips any whitespaces
         db_otp_clean = str(profile.email_otp).strip()
         app_otp_clean = str(otp).strip()
 
@@ -196,7 +216,7 @@ def verify_email_otp(request):
             profile.email_otp = None
             profile.save()
 
-            # Issue the login tokens
+            # issue the login tokens
             tokens = get_tokens_for_user(user)
             return Response({
                 "status": "Verified",
@@ -216,13 +236,11 @@ def verify_email_otp(request):
     except Exception as e:
         print(f"Result: SYSTEM CRASH - {str(e)}")
         return Response({"error": "Something went wrong."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-# ==========================================
-# NEW ENDPOINT: RESEND OTP
-# ==========================================
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def resend_otp(request):
+    """Generates and sends a new OTP if the user requests one."""
     email = request.data.get('email')
 
     if not email:
@@ -231,14 +249,13 @@ def resend_otp(request):
     try:
         user = User.objects.get(email=email)
         
-        # 1. Generate a new 6-digit OTP
         new_otp = str(random.randint(100000, 999999))
         
-        # 2. Save it to the exact place your verify function looks for it
+        # save to the exact place where verify function looks for it
         user.profile.email_otp = new_otp
         user.profile.save()
 
-        # 3. Send the Email (with your Hackathon Safety Net)
+        # send email
         try:
             subject = 'Fair App - New Verification Code'
             message = f"""Hello {user.first_name},
@@ -268,26 +285,23 @@ The Fair App Team
         return Response({"message": "New OTP sent successfully."}, status=status.HTTP_200_OK)
 
     except User.DoesNotExist:
-        # Security best practice: Don't tell hackers if an email exists or not
         return Response(
             {"message": "If this email is registered, a new code has been sent."}, 
             status=status.HTTP_200_OK
         )
-    
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def request_password_reset(request):
+    """Initiates a password reset by sending an OTP to the provided email."""
     email = request.data.get('email')
     
     try:
         user = User.objects.get(email=email)
-        # Generate a new 6-digit code
         otp = str(random.randint(100000, 999999))
         user.profile.email_otp = otp
         user.profile.save()
 
-        # Hackathon Safety Net
         try:
             subject = 'Fair App - Password Reset Request'
             message = f"""Hello,
@@ -315,17 +329,16 @@ Fair App Security Team
             print(f"Error: {str(e)}")
             print(f"The Reset OTP for {email} is: {otp}\n----------------------------\n")
 
-        # Security best practice: Always return a generic success message 
-        # so hackers can't use this to guess registered emails.
+        # hackers can't use this to guess registered emails.
         return Response({"message": "If an account exists, a code was sent."}, status=status.HTTP_200_OK)
         
     except User.DoesNotExist:
         return Response({"message": "If an account exists, a code was sent."}, status=status.HTTP_200_OK)
 
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def reset_password(request):
+    """Verifies the reset OTP and assigns the new password."""
     email = request.data.get('email')
     otp = request.data.get('otp')
     new_password = request.data.get('newPassword')
@@ -355,12 +368,159 @@ def reset_password(request):
     except User.DoesNotExist:
         return Response({"error": "User not found."}, status=status.HTTP_404_NOT_FOUND)
 
-# ==========================================
-# 3. TRIP & REPORT ENDPOINTS
-# ==========================================
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    """Verifies old password and sets new password for logged-in users"""
+    serializer = ChangePasswordSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        user = request.user
+        # check old password
+        if not user.check_password(serializer.data.get("old_password")):
+            return Response({"error": "Incorrect current password."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # set new password
+        user.set_password(serializer.data.get("new_password"))
+        user.save()
+        return Response({"message": "Password changed successfully."}, status=status.HTTP_200_OK)
+
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# USER PROFILE & VERIFICATION
+# handles retrieving profiles, updating details, and uploading IDs
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def get_user_profile(request):
+    """Fetches or updates the currently authenticated user's profile."""
+    user = request.user
+    
+    # --- HANDLE UPDATING (PATCH) ---
+    if request.method == 'PATCH':
+        serializer = UserUpdateSerializer(user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response({
+                "status": "Success",
+                "message": "Profile updated successfully",
+                "first_name": user.first_name,
+                "last_name": user.last_name
+            }, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    # --- HANDLE FETCHING (GET) ---
+    try:
+        profile = user.profile
+        return Response({
+            "user_id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "user_type": profile.user_type,
+            "is_discount_verified": profile.is_discount_verified,
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({"error": "Failed to fetch profile."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser]) # expect a file, for DRF
+def submit_id_verification(request):
+    """Accepts a photo ID upload for discount verification."""
+    user = request.user
+    
+    # grab data from the multipart/form-data request
+    discount_type = request.data.get('discount_type') 
+    id_photo = request.FILES.get('id_photo') # the physical file
+
+    if not discount_type or not id_photo:
+        return Response({"error": "Missing ID type or photo."}, status=status.HTTP_400_BAD_REQUEST)
+
+    type_mapping = {
+        'student': 'Student',
+        'senior': 'Senior',
+        'pwd': 'PWD'
+    }
+    mapped_type = type_mapping.get(discount_type, 'Regular')
+
+    try:
+        profile = user.profile
+
+        # automatically handles the 'id_photos/' folder, unique names, and storage.
+        profile.user_type = mapped_type
+        profile.id_photo = id_photo 
+        profile.is_discount_verified = False # ensures LGU admin must manually approve it
+        profile.save()
+
+        return Response({
+            "status": "Success",
+            "message": "ID submitted successfully for LGU review."
+        }, status=status.HTTP_200_OK)
+
+    except Exception as e:
+        print(f"Error saving ID upload: {str(e)}")
+        return Response({"error": "Failed to upload ID to server."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# 4. FARE & ORDINANCE ENDPOINTS
+# handles retrieving the active ordinance/fare logic
+
+@api_view(['GET'])
+def get_active_fare(request):
+    """Fetches the currently active fare matrix set by the LGU."""
+    try:
+        # ask the database for the ONE row where is_active is True
+        active_matrix = FareMatrix.objects.get(is_active=True)
+        
+        # translate it to JSON
+        serializer = FareMatrixSerializer(active_matrix)
+        
+        # send it to the mobile app
+        return Response(serializer.data, status=status.HTTP_200_OK)
+        
+    except FareMatrix.DoesNotExist:
+        # if the Admin forgot to set an active matrix
+        return Response(
+            {"error": "No active fare matrix found in the system. Contact LGU."}, 
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+
+# TRICYCLE ENDPOINTS
+# handles validation and querying of registered tricycles
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def check_tricycle(request, body_number):
+    """Quick check for the React Native app after a ride to ensure legitimacy."""
+    try:
+        tricycle = Tricycle.objects.get(body_number=body_number)
+        return Response({"status": tricycle.status}, status=status.HTTP_200_OK)
+    except Tricycle.DoesNotExist:
+        # return 404 so the app knows to throw the Unregistered warning
+        return Response({"error": "Tricycle not found"}, status=status.HTTP_404_NOT_FOUND)
+
+
+# TRIP & REPORT ENDPOINTS
+# handles user commutes, saving GPS logs, and filing dispute reports
 @api_view(['POST'])
 def submit_trip(request):
-    """Logs the final GPS distance and fare to the LGU database"""
+    """logs the final GPS distance and fare to the LGU database"""
+    
+    # grab the body number sent from React Native
+    body_number = request.data.get('tricycle')
+
+    # if there is a body number, check if it exists. If not, silently auto-create it as 'Unverified'.
+    if body_number:
+        Tricycle.objects.get_or_create(
+            body_number=body_number,
+            defaults={
+                'status': 'Unverified',
+                'driver_name': 'Unknown (Flagged via App)',
+                'toda_branch': 'Unknown'
+            }
+        )
+
     serializer = TripSerializer(data=request.data)
     
     if serializer.is_valid():
@@ -371,7 +531,27 @@ def submit_trip(request):
         )
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_trip_history(request):
+    """Fetches the ride history for the currently logged-in user"""
+    try:
+        # get all trips belonging to the logged-in user, newest first
+        trips = Trip.objects.filter(user=request.user).order_by('-timestamp')
+        
+        # serialize the data into the format React Native needs
+        serializer = TripHistorySerializer(trips, many=True)
+        
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    except Exception as e:
+        print(f"Error fetching history: {str(e)}")
+        return Response(
+            {"error": "Failed to fetch trip history."}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
 @api_view(['POST'])
+@parser_classes([MultiPartParser, FormParser]) # parsed photo
 def submit_report(request):
     """Logs an overcharging or arrogant driver complaint"""
     serializer = ReportSerializer(data=request.data)
@@ -379,7 +559,7 @@ def submit_report(request):
     if serializer.is_valid():
         report = serializer.save()
         
-        # 🚀 Send confirmation email to the user
+        # send confirmation email to the user
         try:
             user = request.user
             subject = f"Dispute Report Received - Ticket #{report.report_id}"
@@ -418,25 +598,6 @@ Fair App Monitoring System
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def get_trip_history(request):
-    """Fetches the ride history for the currently logged-in user"""
-    try:
-        # Get all trips belonging to the logged-in user, newest first
-        trips = Trip.objects.filter(user=request.user).order_by('-timestamp')
-        
-        # Serialize the data into the format React Native needs
-        serializer = TripHistorySerializer(trips, many=True)
-        
-        return Response(serializer.data, status=status.HTTP_200_OK)
-    except Exception as e:
-        print(f"Error fetching history: {str(e)}")
-        return Response(
-            {"error": "Failed to fetch trip history."}, 
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-    
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
 def get_report_history(request):
     """Fetches all filed complaints for the currently logged-in user"""
     try:
@@ -449,91 +610,4 @@ def get_report_history(request):
             {"error": "Failed to fetch reports."}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-    
-
-# ==========================================
-# 4. USER PROFILE & VERIFICATION
-# ==========================================
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def submit_id_verification(request):
-    user = request.user
-    
-    # 1. Grab data from the multipart/form-data request
-    discount_type = request.data.get('discount_type') 
-    id_photo = request.FILES.get('id_photo')
-
-    if not discount_type or not id_photo:
-        return Response({"error": "Missing ID type or photo."}, status=status.HTTP_400_BAD_REQUEST)
-
-    # 2. Map the React Native tags to your Django choices
-    type_mapping = {
-        'student': 'Student',
-        'senior': 'Senior',
-        'pwd': 'PWD'
-    }
-    mapped_type = type_mapping.get(discount_type, 'Regular')
-
-    try:
-        profile = user.profile
-
-        # 3. Securely save the file with a unique name to avoid overwriting
-        # Example: id_photos/user_5_9b2a1c_id_photo.jpg
-        unique_filename = f"id_photos/user_{user.id}_{uuid.uuid4().hex[:6]}_{id_photo.name}"
-        saved_path = default_storage.save(unique_filename, id_photo)
-        
-        # 4. Generate the full URL so it renders properly in the Unfold Admin panel
-        file_url = request.build_absolute_uri(settings.MEDIA_URL + saved_path)
-
-        # 5. Update the user's profile
-        profile.user_type = mapped_type
-        profile.id_photo_url = file_url
-        profile.is_discount_verified = False # Ensures LGU admin must manually approve it
-        profile.save()
-
-        return Response({
-            "status": "Success",
-            "message": "ID submitted successfully for LGU review."
-        }, status=status.HTTP_200_OK)
-
-    except Exception as e:
-        print(f"Error saving ID upload: {str(e)}")
-        return Response({"error": "Failed to upload ID to server."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_user_profile(request):
-    """Fetches the user's current profile, including their verification status."""
-    try:
-        user = request.user
-        profile = user.profile
-        
-        return Response({
-            "user_id": user.id,
-            "email": user.email,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "user_type": profile.user_type, # e.g., 'Student', 'Senior', 'Regular'
-            "is_discount_verified": profile.is_discount_verified, # True or False!
-        }, status=status.HTTP_200_OK)
-        
-    except Exception as e:
-        return Response({"error": "Failed to fetch profile."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-def unfold_dashboard_callback(request, context):
-    today = timezone.now().date()
-    
-    active_matrix = FareMatrix.objects.filter(is_active=True).first()
-    pending_reports = Report.objects.filter(status='Pending')
-    
-    context['is_super'] = request.user.is_superuser
-    context['pending_reports_count'] = pending_reports.count()
-    context['resolved_today_count'] = Report.objects.filter(status='Resolved', filed_at__date=today).count()
-    context['trips_today_count'] = Trip.objects.filter(timestamp__date=today).count()
-    context['active_matrix'] = active_matrix
-    context['priority_reports'] = pending_reports.order_by('-filed_at')[:3]
-    context['recent_trips'] = Trip.objects.all().order_by('-timestamp')[:5]
-
-    return context
-
 

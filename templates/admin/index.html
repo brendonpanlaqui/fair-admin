@@ -121,9 +121,14 @@
                             {% if trip.actual_fare_charged > trip.computed_fare %}
                                 <p class="text-sm font-bold text-red-600">₱{{ trip.actual_fare_charged }}</p>
                                 <p class="text-xs text-red-400">⚠ Overcharged</p>
+
+                            {% elif trip.actual_fare_charged < trip.computed_fare %}
+                                <p class="text-sm font-bold text-blue-600">₱{{ trip.actual_fare_charged }}</p>
+                                <p class="text-xs text-blue-400">↓ Below Ordinance</p>
+
                             {% else %}
                                 <p class="text-sm font-bold text-green-600">₱{{ trip.actual_fare_charged }}</p>
-                                <p class="text-xs text-gray-400 tmo-text-sub">Paid correctly</p>
+                                <p class="text-xs text-gray-400 tmo-text-sub">✔ Paid correctly</p>
                             {% endif %}
                         </div>
                     </li>
