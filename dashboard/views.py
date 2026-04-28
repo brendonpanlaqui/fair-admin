@@ -7,6 +7,7 @@ from django.contrib.auth.hashers import make_password
 from django.core.mail import send_mail
 from django.core.files.storage import default_storage
 from django.utils import timezone
+from datetime import timedelta
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, parser_classes
@@ -551,14 +552,59 @@ def get_trip_history(request):
         )
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser]) # parsed photo
 def submit_report(request):
     """Logs an overcharging or arrogant driver complaint"""
-    serializer = ReportSerializer(data=request.data)
+    user = request.user
+    trip_id = request.data.get('trip')
+    manual_body_number = request.data.get('manual_body_number')
+
+    # SPAM PREVENTION & RATE LIMITING
+    if trip_id:
+        if Report.objects.filter(user=user, trip_id=trip_id).exists():
+            return Response(
+                {"error": "You have already filed a report for this specific trip."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+    elif manual_body_number:
+        time_limit = timezone.now() - timedelta(hours=24)
+        if Report.objects.filter(user=user, manual_body_number=manual_body_number, filed_at__gte=time_limit).exists():
+            return Response(
+                {"error": "You recently reported this driver. Please wait 24 hours before filing another manual report."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+    # force the authenticated user ID into the data to prevent spoofing
+    data = request.data.copy()
+    data['user'] = user.id
+
+    serializer = ReportSerializer(data=data)
     
     if serializer.is_valid():
         report = serializer.save()
         
+        # CROWDSOURCE FLAGGING LOGIC
+        if manual_body_number:
+            unique_reporters = Report.objects.filter(
+                manual_body_number=manual_body_number
+            ).values('user').distinct().count()
+            
+            # if 3 or more different commuters report the same unverified driver, automatically escalate/flag the tricycle
+            if unique_reporters >= 3:
+                tricycle, created = Tricycle.objects.get_or_create(
+                    body_number=manual_body_number,
+                    defaults={
+                        'status': 'Unverified',
+                        'driver_name': 'Unknown (Flagged via App)',
+                        'toda_branch': 'Unknown'
+                    }
+                )
+                
+                if tricycle.status != 'Suspended':
+                    tricycle.driver_name = '⚠️ URGENT REVIEW (3+ Reports)'
+                    tricycle.save()
+
         # send confirmation email to the user
         try:
             user = request.user
@@ -610,4 +656,3 @@ def get_report_history(request):
             {"error": "Failed to fetch reports."}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-
