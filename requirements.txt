@@ -6,3 +6,4 @@ python-dotenv>=1.0.0
 gunicorn>=21.2.0
 dj-database-url>=2.1.0
 djangorestframework-simplejwt>=5.3.1
+django-unfold>=0.18.0
