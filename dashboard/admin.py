@@ -67,7 +67,7 @@ class UserProfileAdmin(ModelAdmin):
             "classes": ["tab"],
         }),
         ("Discount Verification Center", {
-            # user_type moved tp this section
+            # user_type moved to this section
             "fields": ('user_type', 'is_discount_verified', 'id_photo'),
             "classes": ["tab"],
             "description": mark_safe(
@@ -295,7 +295,7 @@ class ReportAdmin(ModelAdmin):
         return not request.user.groups.filter(name='TODA').exists()
 
 
-# CUSTOM USER ADMIN (2-TIER STAFF MVP)
+# CUSTOM USER ADMIN 
 # unregister default models
 admin.site.unregister(User)
 admin.site.unregister(Group)

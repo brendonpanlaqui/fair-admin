@@ -63,7 +63,7 @@ class TripHistorySerializer(serializers.ModelSerializer):
         model = Trip
         fields = [
             'trip_id', 'body_number', 'matrix_id', 'trip_mode',
-            'total_distance_km', 'computed_fare', 'discount_applied',
+            'total_distance_km', 'computed_fare', 'actual_fare_charged', 'discount_applied',
             'status', 'timestamp', 'origin_name', 'destination_name',
             'origin_coords', 'dest_coords', 'polyline_hash'
         ]
@@ -114,7 +114,7 @@ class ReportHistorySerializer(serializers.ModelSerializer):
         if obj.trip and hasattr(obj.trip, 'tricycle'):
             return obj.trip.tricycle.body_number
         
-        # 2. if it's a manual report, return what the user typed in
+        # if it's a manual report, return what the user typed in
         if obj.manual_body_number:
             return obj.manual_body_number
             
