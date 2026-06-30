@@ -8,6 +8,7 @@ import os
 from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
+import dj_database_url
 from django.templatetags.static import static
 from django.urls import reverse_lazy
 
@@ -20,12 +21,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # CHANGE FOR PRODUCTION!!!!
 SECRET_KEY = os.getenv('SECRET_KEY')
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'False') == 'True'
 WSGI_APPLICATION = 'config.wsgi.application'
 ROOT_URLCONF = 'config.urls'
 
 # SECURITY & CORS
-ALLOWED_HOSTS = ['192.168.8.35', 'localhost', '127.0.0.1', "http://10.0.2.2:8000", '*']
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,192.168.8.35').split(',')
 CORS_ALLOW_ALL_ORIGINS = True
 
 INSTALLED_APPS = [
@@ -53,6 +54,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -80,14 +82,11 @@ TEMPLATES = [
 
 # POSTGRES 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME'),
-        'USER': os.getenv('DB_USER'),
-        'PASSWORD': os.getenv('DB_PASSWORD'),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '5432'),
-    }
+    'default': dj_database_url.config(
+        default=os.getenv('DATABASE_URL'),
+        conn_max_age=600,
+        ssl_require=True
+    )
 }
 
 # AUTHENTICATION, PASSWORDS, & APIs
@@ -121,6 +120,7 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'static'),
 ]
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
