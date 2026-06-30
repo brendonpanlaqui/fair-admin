@@ -10,3 +10,6 @@ python manage.py collectstatic --no-input
 
 # Sync your cloud database models
 python manage.py migrate
+
+# automatically create the superuser if it doesn't exist
+python manage.py createsuperuser --noinput || true
