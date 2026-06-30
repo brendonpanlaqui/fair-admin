@@ -10,6 +10,10 @@ urlpatterns = [
     path('', RedirectView.as_view(url='/admin/', permanent=False), name='index'),
     path('admin/', admin.site.urls),
     path('', include('dashboard.urls')),
+    path(
+        'favicon.ico',
+        RedirectView.as_view(url=settings.STATIC_URL + 'images/favicon.png'),
+    ),
 ]
 
 if settings.DEBUG:

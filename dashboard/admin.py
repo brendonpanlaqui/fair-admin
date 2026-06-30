@@ -51,8 +51,13 @@ class UserProfileAdmin(ModelAdmin):
     # button to view profile and verify ID
     def action_button(self, obj):
         url = reverse('admin:dashboard_userprofile_change', args=[obj.pk])
+        if obj.user_type == 'Pending Driver':
+            return mark_safe(f'<a href="{url}" style="background-color: #F59E0B; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Review Driver App &rarr;</a>')
         
-        if obj.id_photo and not obj.is_discount_verified:
+        elif obj.user_type == 'Driver':
+            return mark_safe(f'<a href="{url}" style="background-color: #3B82F6; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Driver Active 🚕</a>')
+        
+        elif obj.id_photo and not obj.is_discount_verified:
             return mark_safe(f'<a href="{url}" style="background-color: #EF4444; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Verify ID &rarr;</a>')
         elif obj.is_discount_verified:
             return mark_safe(f'<a href="{url}" style="background-color: #10B981; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Verified ✔</a>')
@@ -76,8 +81,19 @@ class UserProfileAdmin(ModelAdmin):
                 '<ol class="text-amber-700 text-xs list-decimal ml-4 space-y-1">'
                 '<li>Review the uploaded ID document carefully.</li>'
                 '<li><b>Confirm or Correct the User Type</b> using the buttons below to match the physical ID.</li>'
-                '<li>Check the "Is discount verified" box to permanently activate their 20% fare discount.</li>'
+                '<li>Check the "Is verified?" box to permanently approve their account.</li>'
                 '</ol>'
+                '</div>'
+            )
+        }),
+        # --- ADDED: DRIVER ASSIGNMENT TAB ---
+        ("Driver Assignment (PTRO Only)", {
+            "fields": ('active_tricycle',),
+            "classes": ["tab"],
+            "description": mark_safe(
+                '<div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 mt-2">'
+                '<p class="text-blue-800 font-bold mb-2 uppercase tracking-wider text-sm">🚕 Driver Linking</p>'
+                '<p class="text-blue-700 text-xs">Select the registered tricycle this driver is currently operating. This is required for the QR Digital Handshake and GPS tracking to function correctly.</p>'
                 '</div>'
             )
         }),

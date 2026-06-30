@@ -1,7 +1,6 @@
 from django.contrib.auth.models import User
 from django.db import models
 
-# EXTENDED USER PROFILE
 class UserProfile(models.Model):
     """to extend default Django auth User model."""
     USER_TYPES = [
@@ -9,6 +8,8 @@ class UserProfile(models.Model):
         ('Student', 'Student'),
         ('Senior', 'Senior Citizen'),
         ('PWD', 'Person with Disability'),
+        ('Pending Driver', 'Pending Driver Verification'),
+        ('Driver', 'Tricycle Driver'), 
     ]
     AUTH_PROVIDERS = [
         ('Local', 'Local (Email/Password)'),
@@ -19,18 +20,52 @@ class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     
     auth_provider = models.CharField(max_length=10, choices=AUTH_PROVIDERS, default='Local')
-    user_type = models.CharField(max_length=10, choices=USER_TYPES, default='Regular')
+    user_type = models.CharField(max_length=15, choices=USER_TYPES, default='Regular') 
     
     # store ID photo for discount verification
-    id_photo = models.ImageField(upload_to='id_photos/', blank=True, null=True, help_text="Photo upload of Student ID, Senior Citizen ID, or PWD ID")
-    is_discount_verified = models.BooleanField(default=False, help_text="Checked by Admin to approve discount")
+    id_photo = models.ImageField(upload_to='id_photos/', blank=True, null=True, help_text="Photo upload of Student ID, Senior Citizen ID, PWD ID, Solo Parents ID, or Franchice/TODA ID for drivers")
+    is_discount_verified = models.BooleanField(default=False, help_text="Checked by Admin for verified approval")
     
     # tracking OTP and Email verification 
     is_email_verified = models.BooleanField(default=False)
     email_otp = models.CharField(max_length=6, blank=True, null=True)
 
+    # --- DIGITAL HANDSHAKE & FCM ---
+    fcm_token = models.CharField(max_length=255, blank=True, null=True, help_text="Firebase device token for push notifications")
+    active_tricycle = models.ForeignKey('Tricycle', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_drivers', help_text="The tricycle the driver is currently operating")
+
+    # GPS coordinates. max_digits=9 and decimal_places=6 gives accuracy down to ~11 centimeters.
+    current_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, help_text="Driver's last known latitude")
+    current_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, help_text="Driver's last known longitude")
+
     def __str__(self):
         return f"{self.user.get_full_name() or self.user.username} - {self.user_type}"
+    
+    def save(self, *args, **kwargs):
+        # save profile to database for latest info
+        super().save(*args, **kwargs)
+
+        # check if the user is an official approved driver and has an active tricycle assigned
+        if self.user_type == 'Driver' and self.active_tricycle:
+            
+            real_name = self.user.get_full_name().strip()
+            if not real_name:
+                real_name = self.user.email
+
+            needs_update = False
+
+            # check if the name needs fixing
+            if self.active_tricycle.driver_name != real_name:
+                self.active_tricycle.driver_name = real_name
+                needs_update = True
+            
+            # check if the status is stuck on Unverified
+            if self.active_tricycle.status != 'Active':
+                self.active_tricycle.status = 'Active'
+                needs_update = True
+
+            if needs_update:
+                self.active_tricycle.save()
 
 
 # TRICYCLE INFRASTRUCTURE
@@ -96,6 +131,8 @@ class Trip(models.Model):
     logs individual rides, connecting a Commuter, a Tricycle, and the Fare Matrix, used to calculate the cost at that specific point in time.
     """
     STATUS_CHOICES = [
+        ('Pending', 'Pending Approval'), 
+        ('Active', 'Active Ride'),      
         ('Completed', 'Completed'),
         ('Cancelled', 'Cancelled'),
     ]
@@ -108,6 +145,10 @@ class Trip(models.Model):
     
     # foreign Keys connecting the trip to its entities
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='trips')
+    
+    # --- ADDED: Explicit link to the Driver User who approved the trip ---
+    driver = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='driven_trips')
+    
     tricycle = models.ForeignKey(Tricycle, on_delete=models.RESTRICT)
     fare_matrix = models.ForeignKey(FareMatrix, on_delete=models.RESTRICT)
     
@@ -126,7 +167,7 @@ class Trip(models.Model):
     
     # a GPS Telemetry and Meta
     polyline_hash = models.TextField(blank=True, null=True) 
-    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='Completed')
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='Pending') # Changed default to Pending
     timestamp = models.DateTimeField(auto_now_add=True)
     
     # raw coordinates
