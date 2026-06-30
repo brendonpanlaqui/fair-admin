@@ -48,7 +48,7 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     
     # Local apps
-    'dashboard',
+    'dashboard.apps.DashboardConfig',
 ]
 
 MIDDLEWARE = [
@@ -194,7 +194,7 @@ UNFOLD = {
                         "badge": "dashboard.views.pending_reports_badge",
                     },
                     {
-                        "title": "Commuter Profiles", 
+                        "title": "User Profiles", 
                         "icon": "group",
                         "link": reverse_lazy("admin:dashboard_userprofile_changelist"),
                     },
