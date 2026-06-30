@@ -83,9 +83,9 @@ TEMPLATES = [
 # POSTGRES 
 DATABASES = {
     'default': dj_database_url.config(
-        default=os.getenv('DATABASE_URL'),
+        default=os.getenv('DATABASE_URL', 'sqlite:///' + os.path.join(BASE_DIR, 'db.sqlite3')),
         conn_max_age=600,
-        ssl_require=True
+        ssl_require=os.getenv('DATABASE_URL') is not None # only enforce SSL if using a cloud URL like Neon
     )
 }
 
