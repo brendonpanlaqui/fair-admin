@@ -1,12 +1,13 @@
 import uuid
 import random
 import math
+import os
+import requests
 
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password
-from django.core.mail import send_mail
 from django.core.files.storage import default_storage
 from django.utils import timezone
 from datetime import timedelta
@@ -18,7 +19,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
 from rest_framework_simplejwt.tokens import RefreshToken
-import requests
+
 # --- ADDED: Import Firebase Messaging ---
 from firebase_admin import messaging
 
@@ -147,7 +148,7 @@ def mobile_register(request):
         is_email_verified=False
     )
 
-    # send the email
+    # send the email via Brevo REST API
     try:
         subject = 'Welcome to Fair App - Verify Your Account'
         message = f"""Hello {first_name},
@@ -163,16 +164,31 @@ This code is valid for 5 minutes. If you did not create this account, please ign
 Safe travels,
 The Fair App Team
 """
-        send_mail(
-            subject=subject,
-            message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[email],
-            fail_silently=False,
-        )
-        print(f"SUCCESS: Verification email sent to {email}")
+        brevo_api_key = os.environ.get("BREVO_API_KEY")
+        url = "https://api.brevo.com/v3/smtp/email"
+        
+        payload = {
+            "sender": {
+                "name": "Fair App Support", 
+                "email": "fairapp.angeles@gmail.com" 
+            },
+            "to": [{"email": email}],
+            "subject": subject,
+            "textContent": message
+        }
+        
+        headers = {
+            "accept": "application/json",
+            "api-key": brevo_api_key,
+            "content-type": "application/json"
+        }
+        
+        # timeout added to prevent Gunicorn workers from hanging if Brevo is slow
+        email_response = requests.post(url, json=payload, headers=headers, timeout=10)
+        print(f"Brevo API Response: {email_response.status_code} - {email_response.text}")
+
     except Exception as e:
-        print(f"\n--- EMAIL FAILED TO SEND ---")
+        print(f"\n--- BREVO API FAILED TO SEND ---")
         print(f"Error: {str(e)}")
         print(f"The OTP for {email} is: {otp}\n----------------------------\n")
 
@@ -263,7 +279,7 @@ def resend_otp(request):
         user.profile.email_otp = new_otp
         user.profile.save()
 
-        # send email
+        # send email via Brevo REST API
         try:
             subject = 'Fair App - New Verification Code'
             message = f"""Hello {user.first_name},
@@ -277,14 +293,28 @@ This code is valid for 5 minutes.
 Safe travels,
 The Fair App Team
 """
-            send_mail(
-                subject=subject,
-                message=message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[email],
-                fail_silently=False,
-            )
-            print(f"SUCCESS: New verification email sent to {email}")
+            brevo_api_key = os.environ.get("BREVO_API_KEY")
+            url = "https://api.brevo.com/v3/smtp/email"
+            
+            payload = {
+                "sender": {
+                    "name": "Fair App Support", 
+                    "email": "fairapp.angeles@gmail.com" 
+                },
+                "to": [{"email": email}],
+                "subject": subject,
+                "textContent": message
+            }
+            
+            headers = {
+                "accept": "application/json",
+                "api-key": brevo_api_key,
+                "content-type": "application/json"
+            }
+            
+            email_response = requests.post(url, json=payload, headers=headers, timeout=10)
+            print(f"Brevo API Response: {email_response.status_code} - {email_response.text}")
+            
         except Exception as e:
             print(f"\n--- NEW OTP EMAIL FAILED TO SEND ---")
             print(f"Error: {str(e)}")
@@ -325,13 +355,28 @@ If you did not request this reset, your account is still secure, and you can saf
 Best regards,
 Fair App Security Team
 """
-            send_mail(
-                subject=subject,
-                message=message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[email],
-                fail_silently=False,
-            )
+            brevo_api_key = os.environ.get("BREVO_API_KEY")
+            url = "https://api.brevo.com/v3/smtp/email"
+            
+            payload = {
+                "sender": {
+                    "name": "Fair App Support", 
+                    "email": "fairapp.angeles@gmail.com" 
+                },
+                "to": [{"email": email}],
+                "subject": subject,
+                "textContent": message
+            }
+            
+            headers = {
+                "accept": "application/json",
+                "api-key": brevo_api_key,
+                "content-type": "application/json"
+            }
+            
+            email_response = requests.post(url, json=payload, headers=headers, timeout=10)
+            print(f"Brevo API Response: {email_response.status_code} - {email_response.text}")
+            
         except Exception as e:
             print(f"\n--- FORGOT PASSWORD EMAIL FAILED ---")
             print(f"Error: {str(e)}")
@@ -884,9 +929,8 @@ def submit_report(request):
                     tricycle.driver_name = '⚠️ URGENT REVIEW (3+ Reports)'
                     tricycle.save()
 
-        # send confirmation email to the user
+        # send confirmation email to the user via Brevo
         try:
-            user = request.user
             subject = f"Dispute Report Received - Ticket #{report.report_id}"
             message = f"""Hello {user.first_name},
 
@@ -905,14 +949,31 @@ Thank you for helping us maintain fair and safe commutes in Angeles City.
 Regards,
 Fair App Monitoring System
 """
-            send_mail(
-                subject=subject,
-                message=message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=True, # fail silently so the app doesn't crash if email fails
-            )
-        except:
+            brevo_api_key = os.environ.get("BREVO_API_KEY")
+            url = "https://api.brevo.com/v3/smtp/email"
+            
+            payload = {
+                "sender": {
+                    "name": "Fair App Support", 
+                    "email": "fairapp.angeles@gmail.com" 
+                },
+                "to": [{"email": user.email}],
+                "subject": subject,
+                "textContent": message
+            }
+            
+            headers = {
+                "accept": "application/json",
+                "api-key": brevo_api_key,
+                "content-type": "application/json"
+            }
+            
+            email_response = requests.post(url, json=payload, headers=headers, timeout=10)
+            print(f"Brevo API Response: {email_response.status_code} - {email_response.text}")
+            
+        except Exception as e:
+            print(f"\n--- REPORT SUBMIT BREVO API FAILED ---")
+            print(f"Error: {str(e)}")
             pass
 
         return Response(
