@@ -558,6 +558,8 @@ def apply_driver(request):
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
+        print(f"\n--- CLOUDINARY UPLOAD ERROR --- \n{str(e)}\n-------------------------------\n")
+        
         return Response({"error": f"Failed to submit application: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # 4. FARE & ORDINANCE ENDPOINTS
