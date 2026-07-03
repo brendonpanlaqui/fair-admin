@@ -175,6 +175,7 @@ class Trip(models.Model):
     origin_lng = models.FloatField(null=True, blank=True)
     dest_lat = models.FloatField(null=True, blank=True)
     dest_lng = models.FloatField(null=True, blank=True)
+    dest_name = models.CharField(max_length=255, blank=True, null=True)
 
     def __str__(self):
         return f"Trip {self.trip_id} (₱{self.actual_fare_charged})"
