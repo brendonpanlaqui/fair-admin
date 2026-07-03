@@ -35,7 +35,8 @@ urlpatterns = [
 
     # Trip Approval/Decline & Digital Handshake
     path('api/trips/request/', views.request_trip, name='api-request-trip'),
-path('api/trips/<str:trip_id>/status/', views.check_trip_status, name='api-trip-status'),    path('api/trips/<str:trip_id>/approve/', views.approve_trip, name='api-approve-trip'),
+    path('api/trips/<str:trip_id>/status/', views.check_trip_status, name='api-check-trip-status'),
+    path('api/trips/<str:trip_id>/approve/', views.approve_trip, name='api-approve-trip'),
     path('api/trips/<str:trip_id>/decline/', views.decline_trip, name='api-decline-trip'),
     path('api/trips/driver/current/', views.get_current_driver_trip, name='api-driver-current-trip'),
     path('api/trips/<str:trip_id>/complete/', views.complete_trip, name='api-complete-trip'),

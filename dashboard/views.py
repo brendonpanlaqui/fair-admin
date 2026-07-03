@@ -676,6 +676,7 @@ def request_trip(request):
             status='Pending',
             dest_lat=data.get('destination_lat'),
             dest_lng=data.get('destination_lng'),
+            dest_name=data.get('destination_name'),
             computed_fare=data.get('fare', 0.00),
             total_distance_km=data.get('distance', 0.0),
             actual_fare_charged=0.00
@@ -768,7 +769,10 @@ def get_current_driver_trip(request):
             "has_active_trip": True,
             "trip_id": active_trip.trip_id,
             "fare": active_trip.computed_fare,
-            "commuter_name": active_trip.user.first_name if active_trip.user else "Passenger"
+            "commuter_name": active_trip.user.first_name if active_trip.user else "Passenger",
+            "dest_lat": active_trip.dest_lat,
+            "dest_lng": active_trip.dest_lng,
+            "dest_name": getattr(active_trip, 'dest_name', 'Destination')
         }, status=status.HTTP_200_OK)
         
     return Response({"has_active_trip": False}, status=status.HTTP_200_OK)
