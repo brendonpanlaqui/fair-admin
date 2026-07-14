@@ -1,5 +1,6 @@
 from django.contrib.auth.models import User
 from django.db import models
+from cloudinary_storage.storage import VideoMediaCloudinaryStorage
 
 class UserProfile(models.Model):
     """to extend default Django auth User model."""
@@ -209,6 +210,14 @@ class Report(models.Model):
     
     # evidence and comments
     evidence_photo = models.ImageField(upload_to='evidence_photos/', null=True, blank=True)
+
+    evidence_video = models.FileField(
+        upload_to='evidence_videos/', 
+        null=True, 
+        blank=True,
+        storage=VideoMediaCloudinaryStorage() 
+    )
+
     violation_type = models.CharField(max_length=20, choices=VIOLATION_TYPES)
     passenger_comments = models.TextField(blank=True, null=True, help_text="The complaint details from the commuter.")    
     

@@ -55,7 +55,7 @@ class UserProfileAdmin(ModelAdmin):
             return mark_safe(f'<a href="{url}" style="background-color: #F59E0B; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Review Driver App &rarr;</a>')
         
         elif obj.user_type == 'Driver':
-            return mark_safe(f'<a href="{url}" style="background-color: #3B82F6; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Driver Active 🚕</a>')
+            return mark_safe(f'<a href="{url}" style="background-color: #3B82F6; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Driver</a>')
         
         elif obj.id_photo and not obj.is_discount_verified:
             return mark_safe(f'<a href="{url}" style="background-color: #EF4444; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Verify ID &rarr;</a>')
@@ -264,36 +264,58 @@ class ReportAdmin(ModelAdmin):
     get_body_number.short_description = "Tricycle Body #"
 
     def evidence_thumbnail(self, obj):
-        """Displays a small square thumbnail in the main list view."""
+        """Displays a thumbnail for photos, or a distinct badge for videos in the list view."""
         if obj.evidence_photo:
             return format_html('<img src="{}" style="width: 40px; height: 40px; object-fit: cover; border-radius: 6px; border: 1px solid #E2E8F0;" />', obj.evidence_photo.url)
-        return mark_safe('<span style="color: #94A3B8; font-style: italic;">No Photo</span>')
-    evidence_thumbnail.short_description = 'Photo'
+        elif obj.evidence_video:
+            return format_html(
+                '<div style="width: 40px; height: 40px; background-color: #FEF2F2; border: 1px solid #FECACA; border-radius: 6px; display: flex; align-items: center; justify-content: center;">'
+                '<span style="color: #DC2626; font-size: 16px; font-weight: bold;">▶</span>'
+                '</div>'
+            )
+        return mark_safe('<span style="color: #94A3B8; font-style: italic;">No Media</span>')
+    evidence_thumbnail.short_description = 'Media'
 
     def evidence_preview(self, obj):
-        """Displays a larger clickable preview inside the ticket details."""
+        """Dynamically renders an image tag or an HTML5 video player."""
+        html = ""
+        
         if obj.evidence_photo:
-            return format_html(
-                '<a href="{0}" target="_blank">'
-                '<img src="{0}" style="max-width: 300px; max-height: 300px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1px solid #E2E8F0;" />'
-                '</a>'
-                '<br><small style="color: #64748B; margin-top: 6px; display: block;">Click image to view full resolution</small>', 
-                obj.evidence_photo.url
-            )
-        return mark_safe('<span style="color: #94A3B8; font-style: italic;">No evidence attached by the commuter.</span>')
+            html += f'''
+                <div style="margin-bottom: 15px;">
+                    <strong style="display:block; margin-bottom: 8px; color: #475569; font-size: 12px;">PHOTO EVIDENCE</strong>
+                    <a href="{obj.evidence_photo.url}" target="_blank">
+                        <img src="{obj.evidence_photo.url}" style="max-width: 300px; max-height: 300px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1px solid #E2E8F0;" />
+                    </a>
+                    <small style="color: #64748B; margin-top: 6px; display: block;">Click image to view full resolution</small>
+                </div>
+            '''
+            
+        if obj.evidence_video:
+            html += f'''
+                <div style="margin-top: 15px;">
+                    <strong style="display:block; margin-bottom: 8px; color: #475569; font-size: 12px;">VIDEO EVIDENCE (15s Max)</strong>
+                    <video width="320" height="400" controls style="border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border: 1px solid #E2E8F0; background-color: #0F172A;">
+                      <source src="{obj.evidence_video.url}" type="video/mp4">
+                      Your browser does not support the video playback.
+                    </video>
+                </div>
+            '''
+            
+        if not html:
+            return mark_safe('<div style="padding: 12px; background-color: #F8FAFC; border-radius: 8px; border: 1px dashed #CBD5E1; color: #64748B; font-style: italic;">No media attached by the commuter.</div>')
+            
+        return mark_safe(html)
     evidence_preview.short_description = 'Attached Evidence'
 
     def review_action(self, obj):
-        # to edit this specific report
         url = reverse('admin:dashboard_report_change', args=[obj.pk])
         
-        # if pending, show a bright red call-to-action button
-        if obj.status == 'Pending' or obj.status == 'Investigating':
+        if obj.status in ['Pending', 'Investigating']:
             return format_html(
                 '<a href="{}" style="background-color: #EF4444; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block; box-shadow: 0 2px 4px rgba(239,68,68,0.2);">Review Dispute &rarr;</a>',
                 url
             )
-        # if resolved, show a quiet gray button
         else:
             return format_html(
                 '<a href="{}" style="background-color: #E2E8F0; color: #475569; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">View Details</a>',
@@ -309,7 +331,6 @@ class ReportAdmin(ModelAdmin):
 
     def has_change_permission(self, request, obj=None):
         return not request.user.groups.filter(name='TODA').exists()
-
 
 # CUSTOM USER ADMIN 
 # unregister default models

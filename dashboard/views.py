@@ -17,6 +17,7 @@ from rest_framework.decorators import api_view, permission_classes, parser_class
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -558,8 +559,6 @@ def apply_driver(request):
         }, status=status.HTTP_200_OK)
 
     except Exception as e:
-        print(f"\n--- CLOUDINARY UPLOAD ERROR --- \n{str(e)}\n-------------------------------\n")
-        
         return Response({"error": f"Failed to submit application: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # 4. FARE & ORDINANCE ENDPOINTS
@@ -613,9 +612,16 @@ def update_fcm_token(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def clear_fcm_token(request):
-    profile = request.user.profile
-    profile.fcm_token = None  # Or use "" if your model uses a CharField without null=True
-    profile.save()
+    user = request.user
+
+    if user.username.startswith('guest_'):
+        user.delete()
+        return Response({"status": "Guest account and data completely wiped."})
+    
+    if hasattr(request.user, 'profile'):
+        profile = request.user.profile
+        profile.fcm_token = None
+        profile.save()
     return Response({"status": "Token cleared successfully"})
 
 # (Haversine Formula) 
@@ -648,11 +654,10 @@ def request_trip(request):
         if not driver_profile or not driver_profile.fcm_token:
             return Response({"error": "Driver is not available or offline."}, status=status.HTTP_404_NOT_FOUND)
 
-        # 2. The 50-Meter Proximity Lock
+        # the 50-Meter Proximity Lock
         commuter_lat = float(data.get('commuter_lat', 0))
         commuter_lng = float(data.get('commuter_lng', 0))
         
-        # Note: Ensure your UserProfile model has current_lat and current_lng fields!
         driver_lat = getattr(driver_profile, 'current_lat', None)
         driver_lng = getattr(driver_profile, 'current_lng', None)
         
@@ -662,10 +667,10 @@ def request_trip(request):
                 return Response({
                     "error": "You must be near the tricycle to link the ride."
                 }, status=status.HTTP_403_FORBIDDEN)
-        # If no driver GPS is found, we allow it to pass ONLY for testing purposes. 
-        # In production, you would block this if driver_lat is None.
+        # kapag walang nahanap na driver GPS, we allow it to pass ONLY for testing purposes. 
+        # sa production, you would block this if driver_lat is None.
 
-        # 3. Create the Pending Trip
+        # create the Pending Trip
         active_matrix = FareMatrix.objects.filter(is_active=True).first()
         pending_trip_id = str(uuid.uuid4())
 
@@ -716,6 +721,31 @@ def request_trip(request):
     except Exception as e:
         return Response({"error": f"Server error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class GuestLoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        # create a completely random, temporary username
+        temp_username = f"guest_{uuid.uuid4().hex[:10]}"
+        
+        # create the temporary user in the database
+        user = User.objects.create_user(
+            username=temp_username,
+            first_name="Guest",
+            last_name="Commuter"
+        )
+        
+        UserProfile.objects.create(user=user, user_type='Regular')
+
+        # generate standard JWT tokens for this temporary user
+        refresh = RefreshToken.for_user(user)
+        
+        return Response({
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+            'is_guest': True,
+            'temp_id': temp_username
+        })
 
 # COMMUTER POLLS STATUS 
 @api_view(['GET'])
@@ -740,6 +770,20 @@ def approve_trip(request, trip_id):
     
     return Response({"error": "Trip is no longer pending."}, status=status.HTTP_400_BAD_REQUEST)
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def cancel_trip(request, trip_id):
+    """The commuter cancels a trip request before it is approved."""
+    # the user making the request must be the one who owns the trip.
+    trip = get_object_or_404(Trip, trip_id=trip_id, user=request.user)
+
+    if trip.status == 'Pending':
+        trip.status = 'Cancelled'
+        trip.save()
+        return Response({"status": "Success", "message": "Trip cancelled by user."})
+
+    # if the trip is already 'Active', 'Completed', etc., it cannot be cancelled via this endpoint.
+    return Response({"error": "Trip is no longer in a pending state and cannot be cancelled."}, status=status.HTTP_400_BAD_REQUEST)
 
 # DRIVER DECLINES 
 @api_view(['POST'])
@@ -762,7 +806,7 @@ def get_current_driver_trip(request):
     if request.user.profile.user_type != 'Driver':
         return Response({"error": "Not a driver"}, status=status.HTTP_403_FORBIDDEN)
         
-    # Find any trip where this user is the driver and it is currently 'Active'
+    # find any trip where this user is the driver and it is currently 'Active'
     active_trip = Trip.objects.filter(driver=request.user, status='Active').first()
     
     if active_trip:
@@ -770,25 +814,91 @@ def get_current_driver_trip(request):
             "has_active_trip": True,
             "trip_id": active_trip.trip_id,
             "fare": active_trip.computed_fare,
-            "commuter_name": active_trip.user.first_name if active_trip.user else "Passenger"
+            "distance": active_trip.total_distance_km,
+            "commuter_name": active_trip.user.first_name if active_trip.user else "Passenger",
+            "destination_lat": active_trip.dest_lat,
+            "destination_lng": active_trip.dest_lng,
         }, status=status.HTTP_200_OK)
         
     return Response({"has_active_trip": False}, status=status.HTTP_200_OK)
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_current_commuter_trip(request):
+    """Checks if the commuter currently has an ongoing trip and returns recovery data."""
+    # ensure this is a commuter, not a driver
+    if request.user.profile.user_type == 'Driver':
+        return Response({"has_active_trip": False}, status=status.HTTP_200_OK)
+        
+    # find the most recent trip that is either Pending or Active
+    ongoing_trip = Trip.objects.filter(
+        user=request.user, 
+        status__in=['Pending', 'Active']
+    ).order_by('-timestamp').first()
+    
+    if ongoing_trip:
+        return Response({
+            "has_active_trip": True,
+            "trip_id": ongoing_trip.trip_id,
+            "status": ongoing_trip.status,
+            "body_number": ongoing_trip.tricycle.body_number if ongoing_trip.tricycle else None,
+            "dest_lat": ongoing_trip.dest_lat,
+            "dest_lng": ongoing_trip.dest_lng,
+            "fare": ongoing_trip.computed_fare,
+            "distance": ongoing_trip.total_distance_km,
+            "matrix_id": ongoing_trip.fare_matrix.id if ongoing_trip.fare_matrix else None,
+        }, status=status.HTTP_200_OK)
+        
+    return Response({"has_active_trip": False}, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def complete_trip(request, trip_id):
-    """The driver presses 'Drop Off' to finalize the ride."""
+    """The driver presses 'Drop Off' with a soft 50m geofence warning."""
     trip = get_object_or_404(Trip, trip_id=trip_id, driver=request.user)
     
     if trip.status == 'Active':
+        driver_lat = request.data.get('latitude')
+        driver_lng = request.data.get('longitude')
+        force_dropoff = request.data.get('force_dropoff', False)
+        
+        # geofencing check
+        if driver_lat and driver_lng and trip.dest_lat and trip.dest_lng:
+            distance = calculate_distance(
+                float(driver_lat), 
+                float(driver_lng), 
+                float(trip.dest_lat), 
+                float(trip.dest_lng)
+            )
+            
+            # once they are far AND haven't confirmed the override yet
+            if distance > 50 and not force_dropoff:
+                return Response({
+                    "error": "You are far from the destination pin. Are you sure you want to drop off here?",
+                    "requires_confirmation": True
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # finalize the transaction (either they were close enough, or they forced it)
         trip.status = 'Completed'
-        # Finalize the transaction
         trip.actual_fare_charged = trip.computed_fare 
         trip.save()
         
         return Response({"status": "Success", "message": "Trip successfully completed."})
+        
+    return Response({"error": "Trip is not active or already completed."}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def commuter_force_end(request, trip_id):
+    """Allows the commuter to force-end the trip if the driver forgets to swipe."""
+    trip = get_object_or_404(Trip, trip_id=trip_id, user=request.user)
+    
+    if trip.status == 'Active':
+        trip.status = 'Completed (Forced)'
+        trip.actual_fare_charged = trip.computed_fare 
+        trip.save()
+        
+        return Response({"status": "Success", "message": "Trip completed by commuter."})
         
     return Response({"error": "Trip is not active or already completed."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -818,10 +928,20 @@ def submit_trip(request):
     """Logs the final GPS distance and fare to the LGU database. 
     Updates the existing handshake trip, or creates a new one for offline rides."""
     
-    body_number = request.data.get('tricycle')
-    trip_id = request.data.get('trip_id')
+    # create a mutable copy of the payload
+    data = request.data.copy()
+    
+    # force the correct integer ID from the authenticated token
+    if request.user and request.user.is_authenticated:
+        data['user'] = request.user.id
+    elif data.get('user') and isinstance(data['user'], str):
+        # fallback if offline/unauthenticated and the app sent a string
+        data['user'] = None
 
-    # 1. Silently auto-create 'Unverified' tricycles if they don't exist
+    body_number = data.get('tricycle')
+    trip_id = data.get('trip_id')
+
+    # silently auto-create 'Unverified' tricycles if they don't exist
     if body_number:
         Tricycle.objects.get_or_create(
             body_number=body_number,
@@ -832,29 +952,44 @@ def submit_trip(request):
             }
         )
 
-    # 2. Check if this Trip ID already exists in the database (from the Handshake)
-    existing_trip = None
-    if trip_id:
-        existing_trip = Trip.objects.filter(trip_id=trip_id).first()
+    # check if this Trip ID already exists in the database
+    existing_trip = Trip.objects.filter(trip_id=trip_id).first() if trip_id else None
 
-    # 3. If it exists, UPDATE it. If not, CREATE it.
+    # if it exists, UPDATE it. If not, CREATE it.
     if existing_trip:
-        # Passing 'instance' and 'partial=True' tells DRF to perform an UPDATE (PATCH)
-        serializer = TripSerializer(existing_trip, data=request.data, partial=True)
+        serializer = TripSerializer(existing_trip, data=data, partial=True)
         success_status = status.HTTP_200_OK
     else:
-        # Creating a brand new trip (Used for Offline Mode saves)
-        serializer = TripSerializer(data=request.data)
+        serializer = TripSerializer(data=data)
         success_status = status.HTTP_201_CREATED
     
     if serializer.is_valid():
-        serializer.save()
+        was_active = existing_trip and existing_trip.status == 'Active'
+        
+        updated_trip = serializer.save()
+        
+        # once the commuter cancels mid-trip, alert the driver
+        if was_active and updated_trip.status == 'Cancelled':
+            driver_profile = UserProfile.objects.filter(user=updated_trip.driver).first()
+            if driver_profile and driver_profile.fcm_token:
+                try:
+                    expo_push_url = 'https://exp.host/--/api/v2/push/send'
+                    requests.post(expo_push_url, json={
+                        "to": driver_profile.fcm_token,
+                        "title": "Trip Cancelled ⚠️",
+                        "body": "The passenger has cancelled the current trip.",
+                        "sound": "default",
+                        "data": { 'type': 'TRIP_CANCELLED' }
+                    })
+                except Exception as e:
+                    print(f"Failed to notify driver of cancellation: {e}")
+
         return Response(
-            {"status": "Success", "message": "Trip recorded securely.", "trip_id": serializer.data['trip_id']}, 
+            {"status": "Success", "message": "Trip recorded securely.", "trip_id": updated_trip.trip_id}, 
             status=success_status
         )
         
-    # If the data is invalid, print the errors to the console so you can debug easily
+    # If the data is invalid, print the errors to the console
     print("Serializer Errors:", serializer.errors)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

@@ -1,2 +1,7 @@
 .env
 config/firebase-service-account.json
+
+staticfiles/
+static_root/
+
+db.sqlite3

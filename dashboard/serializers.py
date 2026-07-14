@@ -86,7 +86,7 @@ class ReportSerializer(serializers.ModelSerializer):
         model = Report
         fields = [
             'report_id', 'trip', 'user', 'manual_body_number', 'violation_type', 
-            'passenger_comments', 'evidence_photo',
+            'passenger_comments', 'evidence_photo', 'evidence_video',
             'status', 'admin_response', 'filed_at', 'resolved_at'
         ]
         read_only_fields = ['filed_at', 'resolved_at']
