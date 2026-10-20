@@ -17,6 +17,7 @@ urlpatterns = [
     path('api/users/verify-id/', views.submit_id_verification, name='api-verify-id'),
     path('api/users/apply-driver/', views.apply_driver, name='api-apply-driver'),
     path('api/driver/location/update/', views.update_driver_location, name='api-driver-location-update'),
+    path('api/driver/status/toggle/', views.toggle_driver_status, name='api-driver-status-toggle'),
 
     # --- PUSH NOTIFICATIONS ---
     path('api/fcm/tokens/update/', views.update_fcm_token, name='api-update-fcm-token'),

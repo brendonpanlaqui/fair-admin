@@ -35,6 +35,8 @@ class UserProfile(models.Model):
     fcm_token = models.CharField(max_length=255, blank=True, null=True, help_text="Firebase device token for push notifications")
     active_tricycle = models.ForeignKey('Tricycle', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_drivers', help_text="The tricycle the driver is currently operating")
 
+    is_online = models.BooleanField(default=False, help_text="True if driver is accepting rides")
+
     # GPS coordinates. max_digits=9 and decimal_places=6 gives accuracy down to ~11 centimeters.
     current_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, help_text="Driver's last known latitude")
     current_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True, help_text="Driver's last known longitude")

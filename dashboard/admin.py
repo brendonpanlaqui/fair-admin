@@ -1,8 +1,12 @@
+import csv
+
 from django import forms
 from django.contrib import admin
 from django.contrib.admin.models import LogEntry
 from django.contrib.auth.admin import GroupAdmin as BaseGroupAdmin, UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import Group, User
+from django.http import HttpResponse
+from django.shortcuts import render
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe 
@@ -205,20 +209,58 @@ class TripAdmin(ModelAdmin):
     search_fields = ["trip_id", "tricycle__body_number", "origin_address", "destination_address"]
     date_hierarchy = "timestamp"
     
+    # Register the custom action here
+    actions = ["export_receipts"]
+
     def get_list_display_color(self, obj):
         if obj.actual_fare_charged > obj.computed_fare:
             return 'red'
         return None
 
+    # --- ADDED: CSV Receipt Export Action ---
+    @admin.action(description="Export Selected Trips as Receipts (CSV)")
+    def export_receipts(self, request, queryset):
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="trip_receipts.csv"'
+        
+        writer = csv.writer(response)
+        # Write the header row
+        writer.writerow([
+            'Trip ID', 'Date/Time', 'Status', 'Passenger', 
+            'Driver', 'Tricycle Body #', 'Origin', 'Destination',
+            'Distance (km)', 'Computed Fare', 'Actual Fare'
+        ])
+        
+        # Write data rows
+        for trip in queryset:
+            passenger = trip.user.get_full_name() if trip.user else "Guest/Unknown"
+            driver = trip.driver.get_full_name() if trip.driver else "Unknown"
+            # Adjust timestamp formatting to local time timezone automatically handled by Django
+            local_time = trip.timestamp.strftime("%Y-%m-%d %I:%M %p") if trip.timestamp else "N/A"
+            
+            writer.writerow([
+                trip.trip_id,
+                local_time,
+                trip.status,
+                passenger,
+                driver,
+                trip.tricycle.body_number if trip.tricycle else "N/A",
+                trip.origin_address,
+                trip.destination_address,
+                trip.total_distance_km,
+                f"PHP {trip.computed_fare}",
+                f"PHP {trip.actual_fare_charged}"
+            ])
+            
+        return response
+
     def has_module_permission(self, request):
         return not request.user.groups.filter(name='TODA').exists()
 
     def has_view_permission(self, request, obj=None):
-        # LGU can view
         return not request.user.groups.filter(name='TODA').exists()
 
     def has_add_permission(self, request):
-        # nobody can add fake trips manually, not even LGU
         return request.user.is_superuser
 
     def has_change_permission(self, request, obj=None):
@@ -238,6 +280,21 @@ class ReportAdmin(ModelAdmin):
     search_fields = ('report_id', 'manual_body_number', 'trip__tricycle__body_number')
     radio_fields = {"status": admin.HORIZONTAL}
     
+    # register both the CSV action and our new PDF/Dossier action
+    actions = ["export_report_receipts", "export_evidence_dossier"]
+
+    @admin.action(description="Export Selected as Official Evidence Dossier (PDF/Print)")
+    def export_evidence_dossier(self, request, queryset):
+        """
+        Renders a beautifully formatted HTML page of the selected reports, 
+        designed specifically to be saved as a PDF receipt.
+        """
+        context = {
+            'reports': queryset,
+            'title': 'Official Dispute Evidence Dossier'
+        }
+        return render(request, 'admin/report_dossier.html', context)
+    
     fieldsets = (
         ("Commuter Complaint (Read-Only)", {
             "fields": ('report_id', 'user', 'trip', 'manual_body_number', 'violation_type', 'passenger_comments', 'evidence_preview', 'filed_at'),
@@ -256,6 +313,48 @@ class ReportAdmin(ModelAdmin):
     )
 
     readonly_fields = ('report_id', 'user', 'trip', 'manual_body_number', 'violation_type', 'passenger_comments', 'evidence_preview', 'filed_at')
+
+    # --- ADDED: CSV Audit Trail Receipt Export Action ---
+    @admin.action(description="Export Selected Reports as Audit Receipts (CSV)")
+    def export_report_receipts(self, request, queryset):
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="dispute_audit_receipts.csv"'
+        
+        writer = csv.writer(response)
+        # Write the header row
+        writer.writerow([
+            'Report ID', 'Date Filed', 'Status', 'Passenger Name',
+            'Tricycle Body #', 'Violation Type', 'Passenger Comments',
+            'PTRO Resolution / Admin Response', 'Date Resolved'
+        ])
+        
+        # Write data rows
+        for report in queryset:
+            passenger = report.user.get_full_name() if report.user else "Unknown"
+            
+            # Determine if tricycle was linked via GPS or entered manually
+            if report.trip and report.trip.tricycle:
+                body_number = f"{report.trip.tricycle.body_number} (Linked)"
+            else:
+                body_number = f"{report.manual_body_number} (Manual)"
+
+            # Format timestamps to local time (Django handles the timezone shift automatically if TIME_ZONE is set)
+            filed_time = report.filed_at.strftime("%Y-%m-%d %I:%M %p") if report.filed_at else "N/A"
+            resolved_time = report.resolved_at.strftime("%Y-%m-%d %I:%M %p") if report.resolved_at else "Pending"
+            
+            writer.writerow([
+                report.report_id,
+                filed_time,
+                report.status,
+                passenger,
+                body_number,
+                report.get_violation_type_display(),
+                report.passenger_comments,
+                report.admin_response if report.admin_response else "No response yet",
+                resolved_time
+            ])
+            
+        return response
 
     def get_body_number(self, obj):
         if obj.trip and obj.trip.tricycle:

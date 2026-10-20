@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dispute Evidence Dossier</title>
+    <style>
+        :root {
+            --red: #D32F2F;
+            --slate-900: #0F172A;
+            --slate-700: #334155;
+            --slate-500: #64748B;
+            --slate-200: #E2E8F0;
+            --slate-50: #F8FAFC;
+            --emerald: #10B981;
+            --amber: #F59E0B;
+        }
+
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; 
+            color: var(--slate-900); 
+            line-height: 1.5; 
+            background: var(--slate-200); 
+            margin: 0; 
+            padding: 20px;
+        }
+        
+        .report-page { 
+            background: white; 
+            max-width: 850px; 
+            margin: 0 auto 40px auto; 
+            padding: 50px; 
+            border-radius: 8px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+            page-break-after: always; 
+        }
+        
+        /* Official Header */
+        .header { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: flex-start; 
+            border-bottom: 3px solid var(--slate-900); 
+            padding-bottom: 20px; 
+            margin-bottom: 30px; 
+        }
+        .brand h1 { 
+            margin: 0; 
+            font-size: 32px; 
+            font-weight: 900; 
+            color: var(--red); 
+            font-style: italic; 
+            letter-spacing: -1.5px;
+            line-height: 1;
+        }
+        .brand p { 
+            margin: 5px 0 0; 
+            color: var(--slate-700); 
+            font-size: 13px; 
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .doc-meta { text-align: right; }
+        .doc-title { 
+            font-size: 20px; 
+            font-weight: 900; 
+            text-transform: uppercase; 
+            letter-spacing: 1px; 
+            color: var(--slate-900);
+            margin: 0 0 5px 0;
+        }
+        .doc-id {
+            font-family: 'Courier New', Courier, monospace;
+            font-weight: bold;
+            font-size: 16px;
+            color: var(--slate-500);
+        }
+
+        /* Data Grid */
+        .meta-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-bottom: 20px; 
+            border: 2px solid var(--slate-200);
+        }
+        .meta-table td { 
+            padding: 12px 16px; 
+            border: 1px solid var(--slate-200); 
+            width: 50%;
+        }
+        .field-label { 
+            font-weight: 800; 
+            font-size: 10px; 
+            color: var(--slate-500); 
+            text-transform: uppercase; 
+            letter-spacing: 1px; 
+            margin-bottom: 4px;
+            display: block;
+        }
+        .field-value { 
+            font-size: 15px; 
+            font-weight: 600; 
+            color: var(--slate-900); 
+        }
+        
+        /* Badges */
+        .badge { 
+            display: inline-block; 
+            padding: 4px 10px; 
+            border-radius: 6px; 
+            font-size: 12px; 
+            font-weight: 800; 
+            text-transform: uppercase; 
+            letter-spacing: 0.5px;
+        }
+        .badge-violation { background: #FEE2E2; color: #DC2626; border: 1px solid #FCA5A5; }
+        .badge-status { background: var(--slate-100); color: var(--slate-700); border: 1px solid var(--slate-300); }
+        .badge-resolved { background: #D1FAE5; color: #059669; border: 1px solid #6EE7B7; }
+
+        /* Content Blocks */
+        .section-header {
+            font-size: 14px;
+            font-weight: 900;
+            color: var(--slate-900);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 2px solid var(--slate-200);
+            padding-bottom: 8px;
+            margin-bottom: 15px;
+            margin-top: 30px;
+        }
+
+        .statement-box { 
+            background: var(--slate-50); 
+            padding: 20px; 
+            border-left: 4px solid var(--slate-500); 
+            font-size: 14px;
+            font-style: italic;
+            color: var(--slate-700);
+            page-break-inside: avoid;
+        }
+
+        .manual-alert {
+            background: #FEF3C7;
+            border-left: 4px solid var(--amber);
+            padding: 16px;
+            font-size: 13px;
+            color: #92400E;
+            margin-bottom: 20px;
+        }
+
+        /* Evidence Block */
+        .evidence-container {
+            text-align: center;
+            background: var(--slate-50);
+            padding: 20px;
+            border: 1px dashed var(--slate-500);
+            border-radius: 8px;
+            page-break-inside: avoid;
+        }
+        .evidence-photo { 
+            max-width: 100%; 
+            max-height: 450px; 
+            border-radius: 4px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
+        }
+        .no-evidence {
+            color: var(--slate-500);
+            font-weight: 600;
+            padding: 30px;
+        }
+        
+        /* Official Resolution Box */
+        .resolution-box { 
+            background: #F0FDF4; 
+            padding: 24px; 
+            border: 2px solid #A7F3D0;
+            border-radius: 8px; 
+            margin-top: 30px; 
+            page-break-inside: avoid;
+        }
+        .resolution-header {
+            color: #065F46;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        .resolution-text {
+            font-weight: 600;
+            color: #064E3B;
+            font-size: 15px;
+        }
+        .resolution-footer {
+            color: #047857; 
+            margin-top: 20px; 
+            font-size: 12px;
+            font-weight: 700;
+            border-top: 1px solid #A7F3D0; 
+            padding-top: 12px;
+        }
+
+        .footer-stamp {
+            text-align: center;
+            margin-top: 40px;
+            font-size: 10px;
+            color: var(--slate-500);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        /* Print Styles */
+        @media print {
+            body { background: white; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .report-page { box-shadow: none; margin: 0; padding: 20px 0; border-radius: 0; }
+            .no-print { display: none !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="no-print" style="background:#FEF2F2; padding: 15px; text-align:center; color:#DC2626; font-weight:bold; border-bottom: 1px solid #FECACA; border-radius: 8px; max-width: 850px; margin: 0 auto 20px auto; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+        Press Ctrl+P (or Cmd+P) and change the Destination to "Save as PDF" to export this dossier.
+    </div>
+
+    {% for report in reports %}
+    <div class="report-page">
+        <!-- Header -->
+        <div class="header">
+            <div class="brand">
+                <h1>fair</h1>
+                <p>Public Transportation Regulatory Office</p>
+            </div>
+            <div class="doc-meta">
+                <h2 class="doc-title">Dispute Dossier</h2>
+                <div class="doc-id">TKT-{{ report.report_id }}</div>
+            </div>
+        </div>
+        
+        <!-- Key Meta Information -->
+        <div class="section-header">Incident Overview</div>
+        <table class="meta-table">
+            <tr>
+                <td>
+                    <span class="field-label">Date & Time Filed</span>
+                    <span class="field-value">{{ report.filed_at|date:"F d, Y - h:i A" }}</span>
+                </td>
+                <td>
+                    <span class="field-label">Current Status</span>
+                    <span class="badge {% if report.status == 'Resolved' %}badge-resolved{% else %}badge-status{% endif %}">
+                        {{ report.status }}
+                    </span>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <span class="field-label">Complainant (Passenger)</span>
+                    <span class="field-value">{{ report.user.get_full_name|default:report.user.email }}</span>
+                </td>
+                <td>
+                    <span class="field-label">Violation Category</span>
+                    <span class="badge badge-violation">{{ report.get_violation_type_display }}</span>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2">
+                    <span class="field-label">Subject LGU Tricycle Body Number</span>
+                    <span class="field-value" style="font-size: 18px;">
+                        {% if report.trip and report.trip.tricycle %}
+                            <strong>#{{ report.trip.tricycle.body_number }}</strong> <span style="color:var(--emerald); font-size: 13px;">(Verified GPS App Ride)</span>
+                        {% else %}
+                            <strong>#{{ report.manual_body_number }}</strong> <span style="color:var(--amber); font-size: 13px;">(Manually Flagged by Passenger)</span>
+                        {% endif %}
+                    </span>
+                </td>
+            </tr>
+        </table>
+
+        <!-- Driver & Telemetry Audit Trail -->
+        <div class="section-header">Driver & Trip Telemetry (Audit Trail)</div>
+        {% if report.trip %}
+            <table class="meta-table">
+                <tr>
+                    <td>
+                        <span class="field-label">Assigned Driver</span>
+                        <span class="field-value">{{ report.trip.driver.get_full_name|default:report.trip.tricycle.driver_name|default:"Unknown Driver" }}</span>
+                    </td>
+                    <td>
+                        <span class="field-label">TODA Branch</span>
+                        <span class="field-value">{{ report.trip.tricycle.toda_branch|default:"Unknown TODA" }}</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <span class="field-label">Pick-up Location</span>
+                        <span class="field-value">{{ report.trip.origin_address|default:"Not recorded" }}</span>
+                    </td>
+                    <td>
+                        <span class="field-label">Drop-off Location</span>
+                        <span class="field-value">{{ report.trip.destination_address|default:"Not recorded" }}</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <span class="field-label">Ordinance Computed Fare</span>
+                        <span class="field-value">PHP {{ report.trip.computed_fare }}</span>
+                    </td>
+                    <td>
+                        <span class="field-label">Actual Fare Charged</span>
+                        <span class="field-value" style="color: var(--red); font-weight: 800;">PHP {{ report.trip.actual_fare_charged }}</span>
+                    </td>
+                </tr>
+            </table>
+        {% else %}
+            <div class="manual-alert">
+                <strong>Manual Report:</strong> This incident was not recorded via the Fair App's GPS digital handshake. The PTRO must manually cross-reference Body #<strong>{{ report.manual_body_number }}</strong> with LGU records to identify the driver and TODA branch. Telemetry data (route and computed fare) is unavailable.
+            </div>
+        {% endif %}
+
+        <!-- Statements -->
+        <div class="section-header">Complainant's Official Statement</div>
+        <div class="statement-box">
+            "{{ report.passenger_comments|default:"No written statement provided by the commuter."|linebreaksbr }}"
+        </div>
+
+        <!-- Evidence -->
+        <div class="section-header">Submitted Media Evidence</div>
+        <div class="evidence-container">
+            {% if report.evidence_photo %}
+                <img src="{{ report.evidence_photo.url }}" class="evidence-photo" alt="Violation Evidence">
+            {% else %}
+                <div class="no-evidence">No photographic evidence was attached to this ticket.</div>
+            {% endif %}
+        </div>
+
+        <!-- Official PTRO Resolution -->
+        <div class="resolution-box">
+            <div class="resolution-header">PTRO Official Resolution / Admin Remarks</div>
+            <div class="resolution-text">
+                {{ report.admin_response|default:"Pending Investigation - No official response has been recorded yet."|linebreaks }}
+            </div>
+            {% if report.resolved_at %}
+                <div class="resolution-footer">
+                    Officially Resolved by PTRO on: {{ report.resolved_at|date:"F d, Y - h:i A" }}
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="footer-stamp">
+            Generated by the Fair App Platform • Angeles City LGU
+        </div>
+    </div>
+    {% endfor %}
+
+    <script>
+        window.onload = function() {
+            setTimeout(function() { window.print(); }, 800);
+        };
+    </script>
+</body>
+</html>

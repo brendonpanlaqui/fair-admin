@@ -634,6 +634,20 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     a = math.sin(delta_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda/2)**2
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def toggle_driver_status(request):
+    """Syncs the driver's online/offline toggle to the database."""
+    profile = request.user.profile
+    if profile.user_type != 'Driver':
+        return Response({"error": "Only drivers can toggle status."}, status=403)
+        
+    is_online = request.data.get('is_online', False)
+    profile.is_online = is_online
+    profile.save()
+    
+    return Response({"status": "Success", "is_online": profile.is_online})
+
 # COMMUTER REQUESTS RIDE 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -653,6 +667,11 @@ def request_trip(request):
         
         if not driver_profile or not driver_profile.fcm_token:
             return Response({"error": "Driver is not available or offline."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not driver_profile.is_online:
+            return Response({
+                "error": "This driver is currently offline and not accepting passengers."
+            }, status=status.HTTP_403_FORBIDDEN)
 
         # the 50-Meter Proximity Lock
         commuter_lat = float(data.get('commuter_lat', 0))
@@ -684,6 +703,8 @@ def request_trip(request):
             dest_lat=data.get('destination_lat'),
             dest_lng=data.get('destination_lng'),
             computed_fare=data.get('fare', 0.00),
+            destination_address=data.get('destination_address', 'Unknown Destination'),
+            dest_name=data.get('dest_name', ''),
             total_distance_km=data.get('distance', 0.0),
             actual_fare_charged=0.00
         )
@@ -998,8 +1019,12 @@ def submit_trip(request):
 def get_trip_history(request):
     """Fetches the ride history for the currently logged-in user"""
     try:
+        profile = request.user.profile
         # get all trips belonging to the logged-in user, newest first
-        trips = Trip.objects.filter(user=request.user).order_by('-timestamp')
+        if profile.user_type == 'Driver':
+            trips = Trip.objects.filter(driver=request.user).order_by('-timestamp')
+        else:
+            trips = Trip.objects.filter(user=request.user).order_by('-timestamp')
         
         # serialize the data into the format React Native needs
         serializer = TripHistorySerializer(trips, many=True)

@@ -64,7 +64,7 @@ class TripHistorySerializer(serializers.ModelSerializer):
         fields = [
             'trip_id', 'body_number', 'matrix_id', 'trip_mode',
             'total_distance_km', 'computed_fare', 'actual_fare_charged', 'discount_applied',
-            'status', 'timestamp', 'origin_name', 'destination_name',
+            'status', 'timestamp', 'origin_name', 'destination_name', 'destination_address', 'dest_name',
             'origin_coords', 'dest_coords', 'polyline_hash'
         ]
 
