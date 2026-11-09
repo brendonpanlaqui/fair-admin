@@ -3,6 +3,7 @@ import random
 import math
 import os
 import requests
+import string
 
 from django.shortcuts import get_object_or_404
 from django.conf import settings
@@ -11,6 +12,7 @@ from django.contrib.auth.hashers import make_password
 from django.core.files.storage import default_storage
 from django.utils import timezone
 from datetime import timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, parser_classes
@@ -91,7 +93,7 @@ def mobile_login(request):
         if user.check_password(password):
             if not user.profile.is_email_verified:
                 return Response({
-                    "error": "Account not verified. Please check your email for the OTP.",
+                    "error": "Please verify your account. We sent a one-time password (OTP) to your email.",
                     "requires_otp": True, 
                     "email": email 
                 }, status=status.HTTP_403_FORBIDDEN)
@@ -109,10 +111,10 @@ def mobile_login(request):
                 
             }, status=status.HTTP_200_OK)
         else:
-            return Response({"error": "Invalid password"}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({"error": "Wrong password. You can reset it if you've forgotten it."}, status=status.HTTP_401_UNAUTHORIZED)
             
     except User.DoesNotExist:
-        return Response({"error": "No account found with this email"}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"error": "This email isn't registered. Double-check your spelling or sign up for a new account."}, status=status.HTTP_404_NOT_FOUND)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -691,7 +693,28 @@ def request_trip(request):
 
         # create the Pending Trip
         active_matrix = FareMatrix.objects.filter(is_active=True).first()
-        pending_trip_id = str(uuid.uuid4())
+        def generate_trip_id():
+            chars = string.ascii_uppercase + string.digits
+            return "TRP-" + ''.join(random.choices(chars, k=6))
+
+        pending_trip_id = generate_trip_id()
+        while Trip.objects.filter(trip_id=pending_trip_id).exists():
+            pending_trip_id = generate_trip_id()
+
+        commuter_profile = getattr(user, 'profile', None)
+        is_discounted = False
+        commuter_type = "Regular"
+        if commuter_profile and getattr(commuter_profile, 'is_discount_verified', False):
+            is_discounted = True
+            commuter_type = getattr(commuter_profile, 'user_type', 'Discounted')
+
+        incoming_fare = Decimal(str(data.get('fare', '0.00')))
+
+        if is_discounted and incoming_fare > 0:
+            regular_fare = (incoming_fare / Decimal('0.80')).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            discount_amount = regular_fare - incoming_fare
+        else:
+            discount_amount = Decimal('0.00')
 
         new_trip = Trip.objects.create(
             trip_id=pending_trip_id,
@@ -702,7 +725,8 @@ def request_trip(request):
             status='Pending',
             dest_lat=data.get('destination_lat'),
             dest_lng=data.get('destination_lng'),
-            computed_fare=data.get('fare', 0.00),
+            computed_fare=incoming_fare,
+            discount_applied=discount_amount, # 🚨 Save exact discount amount
             destination_address=data.get('destination_address', 'Unknown Destination'),
             dest_name=data.get('dest_name', ''),
             total_distance_km=data.get('distance', 0.0),
@@ -711,21 +735,25 @@ def request_trip(request):
 
         try:
             expo_push_url = 'https://exp.host/--/api/v2/push/send'
+            discount_notice = f" ({commuter_type.upper()} - 20% Discount. Check Physical ID)" if is_discounted else ""
+            
             push_payload = {
-                "to": driver_profile.fcm_token,  # Expo push token stored in db
+                "to": driver_profile.fcm_token,
                 "title": "New Ride Request! 🛺",
-                "body": f"{user.first_name} is requesting a ride.",
+                "body": f"{user.first_name} is requesting a ride{discount_notice}.",
                 "sound": "default",
                 "data": {
                     'type': 'TRIP_REQUEST',
                     'action': 'APPROVE_TRIP',
                     'trip_id': pending_trip_id,
                     'commuter_name': f"{user.first_name} {user.last_name}",
+                    'is_discounted': is_discounted,
+                    'commuter_type': commuter_type,
                 }
             }
             
             response = requests.post(expo_push_url, json=push_payload)
-            print(f"Expo Push Response: {response.status_code} - {response.text}")
+            print(f"Expo Push Response: {response.status_code} {response.text}")
             
         except Exception as push_err:
             print(f"Failed to send Push to Driver: {str(push_err)}")
@@ -772,9 +800,13 @@ class GuestLoginView(APIView):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def check_trip_status(request, trip_id):
-    """The commuter's app calls this every 3 seconds to see if the driver answered."""
+    """The commuter's app calls this to see if the driver answered, finished, or revoked discount."""
     trip = get_object_or_404(Trip, trip_id=trip_id, user=request.user)
-    return Response({"status": trip.status}, status=status.HTTP_200_OK)
+    return Response({
+        "status": trip.status,
+        "computed_fare": float(trip.computed_fare),     # syncs updated fare if discount revoked
+        "discount_applied": float(trip.discount_applied) # it lets commuter app know if discount became 0
+    }, status=status.HTTP_200_OK)
 
 
 # DRIVER APPROVES 
@@ -827,14 +859,19 @@ def get_current_driver_trip(request):
     if request.user.profile.user_type != 'Driver':
         return Response({"error": "Not a driver"}, status=status.HTTP_403_FORBIDDEN)
         
-    # find any trip where this user is the driver and it is currently 'Active'
     active_trip = Trip.objects.filter(driver=request.user, status='Active').first()
     
     if active_trip:
+        commuter_profile = getattr(active_trip.user, 'profile', None) if active_trip.user else None
+        commuter_type = getattr(commuter_profile, 'user_type', 'Regular') if commuter_profile else 'Regular'
+
         return Response({
             "has_active_trip": True,
             "trip_id": active_trip.trip_id,
-            "fare": active_trip.computed_fare,
+            "fare": float(active_trip.computed_fare),
+            "discount_applied": float(active_trip.discount_applied),
+            "is_discounted": active_trip.discount_applied > 0, # tells driver UI to show Revoke button
+            "commuter_type": commuter_type,                    # e.g., 'Student', 'Senior', 'PWD'
             "distance": active_trip.total_distance_km,
             "commuter_name": active_trip.user.first_name if active_trip.user else "Passenger",
             "destination_lat": active_trip.dest_lat,
@@ -842,6 +879,32 @@ def get_current_driver_trip(request):
         }, status=status.HTTP_200_OK)
         
     return Response({"has_active_trip": False}, status=status.HTTP_200_OK)
+
+# DRIVER REVOKES DISCOUNT IF NO PHYSICAL ID PRESENTED
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def deny_trip_discount(request, trip_id):
+    """Reverts a 20% discounted fare back to the 100% regular ordinance fare."""
+    trip = get_object_or_404(Trip, trip_id=trip_id, driver=request.user)
+
+    if trip.status != 'Active':
+        return Response({"error": "Trip is no longer active."}, status=status.HTTP_400_BAD_REQUEST)
+
+    if trip.discount_applied <= 0:
+        return Response({"error": "No discount is currently applied to this trip."}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Add the 20% discount back to restore the full 100% regular fare
+    regular_fare = Decimal(str(trip.computed_fare)) + Decimal(str(trip.discount_applied))
+    trip.computed_fare = regular_fare.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    trip.discount_applied = Decimal('0.00')
+    trip.save()
+
+    return Response({
+        "status": "Success",
+        "message": "Discount revoked. Fare reverted to regular ordinance rate.",
+        "new_fare": float(trip.computed_fare),
+        "discount_applied": 0.0
+    }, status=status.HTTP_200_OK)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

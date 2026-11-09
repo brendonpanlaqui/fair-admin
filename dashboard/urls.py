@@ -37,6 +37,7 @@ urlpatterns = [
     path('api/trips/<str:trip_id>/force-end/', views.commuter_force_end, name='api-commuter-force-end'),
     path('api/trips/driver/current/', views.get_current_driver_trip, name='api-driver-current-trip'),
     path('api/trips/commuter/current/', views.get_current_commuter_trip, name='current-commuter-trip'),
+    path('api/trips/<str:trip_id>/deny_discount/', views.deny_trip_discount, name='deny_trip_discount'),
     
     # --- HISTORY & REPORTING ---
     path('api/trips/submit/', views.submit_trip, name='api-submit-trip'),
