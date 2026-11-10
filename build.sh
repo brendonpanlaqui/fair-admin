@@ -13,3 +13,6 @@ python manage.py migrate
 
 # automatically create the superuser if it doesn't exist
 python manage.py createsuperuser --noinput || true
+
+# seed the FEDTODA tricycles on deployment
+python manage.py seed_tricycles
