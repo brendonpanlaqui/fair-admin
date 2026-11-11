@@ -236,6 +236,12 @@ UNFOLD = {
                         "link": reverse_lazy("admin:admin_logentry_changelist"), 
                         "permission": lambda request: request.user.is_superuser,
                     },
+                    {
+                        "title": "Backup & Restore",
+                        "icon": "backup",
+                        "link": reverse_lazy("backup_restore"),
+                        "permission": lambda request: request.user.is_superuser,
+                    },
                 ],
             },
         ],

@@ -1,0 +1,50 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block content %}
+<div style="max-width: 900px; margin: 0 auto; padding: 16px;">
+  
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 24px;">
+    
+    <!-- BACKUP CARD -->
+    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(156,163,175,0.2); border-radius: 12px; padding: 24px;">
+      <h2 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+        <span class="material-symbols-outlined" style="color: #ef4444;">cloud_download</span>
+        1. Export Database Backup
+      </h2>
+      <p style="font-size: 0.9rem; opacity: 0.8; margin-bottom: 20px; line-height: 1.5;">
+        Generate and download a complete JSON snapshot of all <strong>Tricycles, Trip Records, Dispute Reports, Fare Matrices, User Profiles,</strong> and <strong>Accounts</strong>.
+      </p>
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="backup">
+        <button type="submit" style="background: #dc2626; color: #fff; font-weight: 600; padding: 10px 18px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;">
+          <span class="material-symbols-outlined" style="font-size: 18px;">download</span>
+          Download Backup (.json)
+        </button>
+      </form>
+    </div>
+
+    <!-- RESTORE CARD -->
+    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(156,163,175,0.2); border-radius: 12px; padding: 24px;">
+      <h2 style="font-size: 1.15rem; font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+        <span class="material-symbols-outlined" style="color: #10b981;">settings_backup_restore</span>
+        2. Restore Deleted Data
+      </h2>
+      <p style="font-size: 0.9rem; opacity: 0.8; margin-bottom: 16px; line-height: 1.5;">
+        Upload a previously downloaded <code>.json</code> snapshot to immediately recover permanently deleted records and restore system state.
+      </p>
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="restore">
+        <input type="file" name="backup_file" accept=".json" required style="display: block; width: 100%; margin-bottom: 16px; font-size: 0.875rem;">
+        <button type="submit" onclick="return confirm('Restore database from this backup file? Any deleted records in the snapshot will be recovered.');" style="background: #059669; color: #fff; font-weight: 600; padding: 10px 18px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;">
+          <span class="material-symbols-outlined" style="font-size: 18px;">upload_file</span>
+          Restore Database Now
+        </button>
+      </form>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
