@@ -26,13 +26,20 @@ from .models import (
 # USER PROFILE ADMIN (LGU & Superadmin)
 @admin.register(UserProfile)
 class UserProfileAdmin(ModelAdmin):
-    """Admin interface for managing commuter profiles and ID verifications."""
-    list_display = ('get_full_name', 'user_type', 'auth_provider', 'is_discount_verified', 'id_photo_preview', 'action_button')
-    list_filter = ('is_discount_verified', 'user_type', 'auth_provider')
+    """Admin interface for managing commuter profiles, discount IDs, and driver verifications."""
+    list_display = (
+        'get_full_name',
+        'user_type',
+        'auth_provider',
+        'get_verification_status',
+        'id_photo_preview',
+        'action_button',
+    )
+    list_filter = ('user_type', 'is_discount_verified', 'auth_provider')
     search_fields = ('user__email', 'user__first_name', 'user__last_name')
-    
-    # to select user type
+
     radio_fields = {"user_type": admin.HORIZONTAL}
+    readonly_fields = ('user', 'auth_provider', 'id_photo_large_preview')
 
     def id_photo_preview(self, obj):
         if obj.id_photo:
@@ -43,67 +50,122 @@ class UserProfileAdmin(ModelAdmin):
                          alt="ID Photo"/>
                 </a>
             ''')
-        return mark_safe('<span style="color: #94A3B8; font-style: italic;">No ID Uploaded</span>')
-    id_photo_preview.short_description = "ID Document"
+        return mark_safe('<span style="color: #94A3B8; font-style: italic;">No Document Uploaded</span>')
+    id_photo_preview.short_description = "Uploaded Document"
 
-    # grab real name of commuter
+    def id_photo_large_preview(self, obj):
+        if obj.id_photo:
+            return mark_safe(f'''
+                <div style="margin-top: 4px;">
+                    <a href="{obj.id_photo.url}" target="_blank">
+                        <img src="{obj.id_photo.url}" 
+                             style="max-width: 360px; max-height: 240px; object-fit: contain; border-radius: 8px; border: 1px solid #CBD5E1; box-shadow: 0 4px 6px rgba(0,0,0,0.08);" 
+                             alt="Uploaded ID"/>
+                    </a>
+                    <small style="display: block; color: #64748B; margin-top: 6px;">Click image to open full resolution in a new tab</small>
+                </div>
+            ''')
+        return mark_safe('<span style="color: #94A3B8; font-style: italic;">No ID or License uploaded by user.</span>')
+    id_photo_large_preview.short_description = "Submitted ID / License Preview"
+
     def get_full_name(self, obj):
         full_name = obj.user.get_full_name()
         return full_name if full_name else obj.user.email
-    get_full_name.short_description = "Commuter Name"
+    get_full_name.short_description = "User Name"
 
-    # button to view profile and verify ID
+    def get_verification_status(self, obj):
+        if obj.user_type == 'Driver':
+            if obj.active_tricycle:
+                return format_html(
+                    '<span style="background-color: #DBEAFE; color: #1E40AF; padding: 4px 10px; border-radius: 999px; font-weight: bold; font-size: 11px;">🛺 Linked (#{})</span>',
+                    obj.active_tricycle.body_number
+                )
+            return mark_safe('<span style="background-color: #FEF3C7; color: #92400E; padding: 4px 10px; border-radius: 999px; font-weight: bold; font-size: 11px;">⚠️ No Tricycle Assigned</span>')
+        elif obj.user_type == 'Pending Driver':
+            return mark_safe('<span style="background-color: #FEF3C7; color: #B45309; padding: 4px 10px; border-radius: 999px; font-weight: bold; font-size: 11px;">⏳ Pending PTRO Approval</span>')
+        elif obj.is_discount_verified:
+            return mark_safe('<span style="background-color: #D1FAE5; color: #065F46; padding: 4px 10px; border-radius: 999px; font-weight: bold; font-size: 11px;">✔ Discount Verified</span>')
+        elif obj.id_photo and not obj.is_discount_verified:
+            return mark_safe('<span style="background-color: #FEE2E2; color: #991B1B; padding: 4px 10px; border-radius: 999px; font-weight: bold; font-size: 11px;">🔍 Needs ID Review</span>')
+        return mark_safe('<span style="color: #94A3B8; font-size: 12px;">Regular (No Discount)</span>')
+    get_verification_status.short_description = "Verification Status"
+
     def action_button(self, obj):
         url = reverse('admin:dashboard_userprofile_change', args=[obj.pk])
         if obj.user_type == 'Pending Driver':
             return mark_safe(f'<a href="{url}" style="background-color: #F59E0B; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Review Driver App &rarr;</a>')
-        
         elif obj.user_type == 'Driver':
-            return mark_safe(f'<a href="{url}" style="background-color: #3B82F6; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Driver</a>')
-        
+            return mark_safe(f'<a href="{url}" style="background-color: #3B82F6; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Manage Driver &rarr;</a>')
         elif obj.id_photo and not obj.is_discount_verified:
-            return mark_safe(f'<a href="{url}" style="background-color: #EF4444; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Verify ID &rarr;</a>')
+            return mark_safe(f'<a href="{url}" style="background-color: #EF4444; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Verify Discount ID &rarr;</a>')
         elif obj.is_discount_verified:
             return mark_safe(f'<a href="{url}" style="background-color: #10B981; color: white; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">Verified ✔</a>')
         else:
-            return mark_safe(f'<a href="{url}" style="background-color: #E2E8F0; color: #475569; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">View User</a>')
+            return mark_safe(f'<a href="{url}" style="background-color: #E2E8F0; color: #475569; padding: 6px 14px; border-radius: 6px; font-weight: bold; font-size: 12px; text-decoration: none; display: inline-block;">View Profile</a>')
     action_button.short_description = "Action"
 
-    # cleaned form
-    fieldsets = (
-        ("Commuter Account Details", {
+    # --- DYNAMIC TABS: SEPARATE DRIVER APPROVAL FROM COMMUTER DISCOUNT VERIFICATION ---
+    def get_fieldsets(self, request, obj=None):
+        account_tab = ("Account Details", {
             "fields": ('user', 'auth_provider', 'is_email_verified'),
             "classes": ["tab"],
-        }),
-        ("Discount Verification Center", {
-            # user_type moved to this section
-            "fields": ('user_type', 'is_discount_verified', 'id_photo'),
+        })
+
+        # 1. If viewing a Driver or Pending Driver -> Show ONLY the Driver Accreditation Tab
+        if obj and obj.user_type in ['Pending Driver', 'Driver']:
+            driver_tab = ("Driver Accreditation & Tricycle Assignment (PTRO)", {
+                "fields": ('user_type', 'active_tricycle', 'id_photo_large_preview'),
+                "classes": ["tab"],
+                "description": mark_safe(
+                    '<div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 mt-2">'
+                    '<p class="text-blue-800 font-bold mb-2 uppercase tracking-wider text-sm">🛺 PTRO Driver Accreditation & Unit Linking</p>'
+                    '<ol class="text-blue-700 text-xs list-decimal ml-4 space-y-1">'
+                    '<li>Verify the driver\'s credentials and TODA registration.</li>'
+                    '<li>Change <b>User Type</b> from <b>Pending Driver</b> to <b>Driver</b> to approve their driver account (or revert to <b>Regular</b> if rejected).</li>'
+                    '<li>Assign their <b>Active Tricycle</b> body number below so their QR code and 50m GPS handshake work on the mobile app.</li>'
+                    '</ol>'
+                    '</div>'
+                )
+            })
+            return (account_tab, driver_tab)
+
+        # 2. If viewing a Commuter -> Show ONLY the Discount Verification Center Tab
+        discount_tab = ("Discount Verification Center", {
+            "fields": ('user_type', 'is_discount_verified', 'id_photo_large_preview'),
             "classes": ["tab"],
             "description": mark_safe(
                 '<div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 mt-2">'
-                '<p class="text-amber-800 font-bold mb-2 uppercase tracking-wider text-sm">⚠️ ID Verification Guidelines</p>'
+                '<p class="text-amber-800 font-bold mb-2 uppercase tracking-wider text-sm">⚠️ Statutory 20% Discount Verification Guidelines</p>'
                 '<ol class="text-amber-700 text-xs list-decimal ml-4 space-y-1">'
-                '<li>Review the uploaded ID document carefully.</li>'
-                '<li><b>Confirm or Correct the User Type</b> using the buttons below to match the physical ID.</li>'
-                '<li>Check the "Is verified?" box to permanently approve their account.</li>'
+                '<li>Review the uploaded Student, Senior Citizen, or PWD ID document below.</li>'
+                '<li><b>Confirm the Discount Category</b> (Regular, Student, Senior Citizen, or PWD) using the radio buttons below.</li>'
+                '<li>Check the <b>"Is discount verified"</b> box to activate their 20% Ordinance No. 723 discount.</li>'
                 '</ol>'
                 '</div>'
             )
-        }),
-        # --- ADDED: DRIVER ASSIGNMENT TAB ---
-        ("Driver Assignment (PTRO Only)", {
-            "fields": ('active_tricycle',),
-            "classes": ["tab"],
-            "description": mark_safe(
-                '<div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4 mt-2">'
-                '<p class="text-blue-800 font-bold mb-2 uppercase tracking-wider text-sm">🚕 Driver Linking</p>'
-                '<p class="text-blue-700 text-xs">Select the registered tricycle this driver is currently operating. This is required for the QR Digital Handshake and GPS tracking to function correctly.</p>'
-                '</div>'
-            )
-        }),
-    )
-    
-    readonly_fields = ('user', 'auth_provider', 'id_photo')
+        })
+
+        return (account_tab, discount_tab)
+
+    # Strictly filter radio buttons so 'Driver' and 'Pending Driver' NEVER appear in the Discount Center
+    def formfield_for_choice_field(self, db_field, request, **kwargs):
+        if db_field.name == "user_type":
+            obj_id = request.resolver_match.kwargs.get('object_id')
+            if obj_id:
+                obj = UserProfile.objects.filter(pk=obj_id).first()
+                if obj and obj.user_type not in ['Pending Driver', 'Driver']:
+                    # Commuters ONLY see: Regular, Student, Senior Citizen, PWD
+                    kwargs['choices'] = [
+                        choice for choice in db_field.get_choices(include_blank=False)
+                        if choice[0] not in ['Pending Driver', 'Driver']
+                    ]
+                elif obj and obj.user_type in ['Pending Driver', 'Driver']:
+                    # Driver Applicants ONLY see: Pending Driver, Driver (Approve), or Regular (Reject)
+                    kwargs['choices'] = [
+                        choice for choice in db_field.get_choices(include_blank=False)
+                        if choice[0] in ['Pending Driver', 'Driver', 'Regular']
+                    ]
+        return super().formfield_for_choice_field(db_field, request, **kwargs)
 
     def has_module_permission(self, request):
         return not request.user.groups.filter(name='TODA').exists()

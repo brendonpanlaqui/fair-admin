@@ -33,7 +33,7 @@ class UserProfile(models.Model):
 
     # --- DIGITAL HANDSHAKE & FCM ---
     fcm_token = models.CharField(max_length=255, blank=True, null=True, help_text="Firebase device token for push notifications")
-    active_tricycle = models.ForeignKey('Tricycle', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_drivers', help_text="The tricycle the driver is currently operating")
+    active_tricycle = models.ForeignKey('Tricycle', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_drivers', help_text="The motorized tricycle currently operated by the user")
 
     is_online = models.BooleanField(default=False, help_text="True if driver is accepting rides")
 
