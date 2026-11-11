@@ -4,15 +4,20 @@ import math
 import os
 import requests
 import string
+import io
+import tempfile
+from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
-from django.shortcuts import get_object_or_404
-from django.conf import settings
-from django.contrib.auth.models import User
+from django.contrib import admin, messages
+from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.hashers import make_password
 from django.core.files.storage import default_storage
+from django.contrib.auth.models import User
+from django.core.management import call_command
+from django.http import HttpResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
-from datetime import timedelta
-from decimal import Decimal, ROUND_HALF_UP
 
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, parser_classes
@@ -42,6 +47,80 @@ from .serializers import (
     UserUpdateSerializer, 
     ChangePasswordSerializer
 )
+
+@staff_member_required
+def backup_restore_view(request):
+    # Restrict strictly to Superusers (Administrator Module requirement)
+    if not request.user.is_superuser:
+        messages.error(request, "Access Denied: Only Superusers can perform Database Backup & Restore.")
+        return redirect("/admin/")
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+
+        # --- ACTION 1: DOWNLOAD FULL BACKUP ---
+        if action == "backup":
+            try:
+                buffer = io.StringIO()
+                # Dump all dashboard tables + user accounts
+                call_command(
+                    "dumpdata",
+                    "dashboard",
+                    "auth.user",
+                    indent=2,
+                    stdout=buffer,
+                )
+                buffer.seek(0)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"fair_db_backup_{timestamp}.json"
+
+                response = HttpResponse(buffer.getvalue(), content_type="application/json")
+                response["Content-Disposition"] = f'attachment; filename="{filename}"'
+                return response
+            except Exception as e:
+                messages.error(request, f"Backup failed: {str(e)}")
+                return redirect(request.path)
+
+        # --- ACTION 2: RESTORE FROM UPLOADED JSON ---
+        elif action == "restore":
+            backup_file = request.FILES.get("backup_file")
+            if not backup_file:
+                messages.error(request, "Please select a valid .json backup file to restore.")
+                return redirect(request.path)
+
+            if not backup_file.name.endswith(".json"):
+                messages.error(request, "Invalid file format. Please upload a .json backup file.")
+                return redirect(request.path)
+
+            tmp_path = None
+            try:
+                # Save uploaded file to a temporary path for Django's loaddata command
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="wb") as tmp:
+                    for chunk in backup_file.chunks():
+                        tmp.write(chunk)
+                    tmp_path = tmp.name
+
+                # Load data back into Neon PostgreSQL (updates existing & recreates deleted rows)
+                call_command("loaddata", tmp_path)
+                messages.success(
+                    request,
+                    "✅ Database successfully restored! All permanently deleted records from the snapshot have been recovered."
+                )
+            except Exception as e:
+                messages.error(request, f"Restore failed: {str(e)}")
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+
+            return redirect(request.path)
+
+    # Include Unfold's admin context so the sidebar and header render properly
+    context = {
+        **admin.site.each_context(request),
+        "title": "Database Backup & Restore",
+    }
+    return render(request, "admin/backup_restore.html", context)
+
 
 # ADMIN DASHBOARD & UI HELPERS
 # data rendering for Unfold
