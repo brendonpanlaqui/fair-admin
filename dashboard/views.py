@@ -7,7 +7,7 @@ import string
 import io
 import tempfile
 from datetime import datetime, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 
 from django.contrib import admin, messages
 from django.contrib.admin.views.decorators import staff_member_required
@@ -730,6 +730,10 @@ def toggle_driver_status(request):
     return Response({"status": "Success", "is_online": profile.is_online})
 
 # COMMUTER REQUESTS RIDE 
+import traceback
+from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+
+# COMMUTER REQUESTS RIDE 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def request_trip(request):
@@ -848,7 +852,7 @@ def request_trip(request):
         return Response({"error": "Tricycle not found."}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
         return Response({"error": f"Server error: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+    
 class GuestLoginView(APIView):
     permission_classes = [AllowAny]
 
@@ -898,7 +902,24 @@ def approve_trip(request, trip_id):
     if trip.status == 'Pending':
         trip.status = 'Active'
         trip.save()
-        return Response({"status": "Success", "message": "Trip approved!"})
+
+        commuter_profile = getattr(trip.user, 'profile', None) if trip.user else None
+        commuter_type = getattr(commuter_profile, 'user_type', 'Regular') if commuter_profile else 'Regular'
+
+        return Response({
+            "status": "Success",
+            "message": "Trip approved!",
+            "has_active_trip": True,
+            "trip_id": trip.trip_id,
+            "fare": float(trip.computed_fare),
+            "discount_applied": float(trip.discount_applied),
+            "is_discounted": trip.discount_applied > 0,
+            "commuter_type": commuter_type,
+            "distance": float(trip.total_distance_km or 0.0),
+            "commuter_name": trip.user.first_name if trip.user else "Passenger",
+            "destination_lat": float(trip.dest_lat) if trip.dest_lat is not None else None,
+            "destination_lng": float(trip.dest_lng) if trip.dest_lng is not None else None,
+        }, status=status.HTTP_200_OK)
     
     return Response({"error": "Trip is no longer pending."}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -949,12 +970,12 @@ def get_current_driver_trip(request):
             "trip_id": active_trip.trip_id,
             "fare": float(active_trip.computed_fare),
             "discount_applied": float(active_trip.discount_applied),
-            "is_discounted": active_trip.discount_applied > 0, # tells driver UI to show Revoke button
-            "commuter_type": commuter_type,                    # e.g., 'Student', 'Senior', 'PWD'
-            "distance": active_trip.total_distance_km,
+            "is_discounted": active_trip.discount_applied > 0,
+            "commuter_type": commuter_type,
+            "distance": float(active_trip.total_distance_km or 0.0),
             "commuter_name": active_trip.user.first_name if active_trip.user else "Passenger",
-            "destination_lat": active_trip.dest_lat,
-            "destination_lng": active_trip.dest_lng,
+            "destination_lat": float(active_trip.dest_lat) if active_trip.dest_lat is not None else None,
+            "destination_lng": float(active_trip.dest_lng) if active_trip.dest_lng is not None else None,
         }, status=status.HTTP_200_OK)
         
     return Response({"has_active_trip": False}, status=status.HTTP_200_OK)
