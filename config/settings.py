@@ -28,6 +28,7 @@ ROOT_URLCONF = 'config.urls'
 # SECURITY & CORS
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,192.168.100.158').split(',')
 CORS_ALLOW_ALL_ORIGINS = True
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 
 INSTALLED_APPS = [
     # Unfold Admin Theme 
