@@ -1,4 +1,5 @@
 import csv
+import json
 
 from django import forms
 from django.contrib import admin
@@ -265,39 +266,255 @@ class FareMatrixAdmin(ModelAdmin):
 # TRIP ADMIN (Strict Audit Trail)
 @admin.register(Trip)
 class TripAdmin(ModelAdmin):
-    """Read-only audit trail for all trips logged by the system."""
-    list_display = ["trip_id", "tricycle", "trip_mode", "total_distance_km", "computed_fare", "actual_fare_charged", "status", "timestamp"]
+    """Read-only audit trail for all trips logged by the system, with visual route mapping."""
+    list_display = [
+        "trip_id",
+        "tricycle",
+        "trip_mode",
+        "total_distance_km",
+        "computed_fare",
+        "actual_fare_charged",
+        "status",
+        "timestamp",
+    ]
     list_filter = ["status", "trip_mode", "timestamp"]
     search_fields = ["trip_id", "tricycle__body_number", "origin_address", "destination_address"]
     date_hierarchy = "timestamp"
-    
-    # Register the custom action here
     actions = ["export_receipts"]
 
-    def get_list_display_color(self, obj):
-        if obj.actual_fare_charged > obj.computed_fare:
-            return 'red'
-        return None
+    readonly_fields = (
+        "trip_id",
+        "user",
+        "driver",
+        "tricycle",
+        "fare_matrix",
+        "trip_mode",
+        "origin_address",
+        "destination_address",
+        "dest_name",
+        "total_distance_km",
+        "stopovers_count",
+        "computed_fare",
+        "actual_fare_charged",
+        "discount_applied",
+        "status",
+        "timestamp",
+        "origin_lat",
+        "origin_lng",
+        "dest_lat",
+        "dest_lng",
+        "polyline_hash",
+        "route_map_preview",
+    )
 
-    # --- ADDED: CSV Receipt Export Action ---
+    fieldsets = (
+        ("1. Visual GPS Route & Telemetry Map", {
+            "fields": (
+                "route_map_preview",
+                ("origin_address", "destination_address"),
+                ("total_distance_km", "trip_mode", "status"),
+            ),
+            "classes": ["tab"],
+        }),
+        ("2. Fare Audit & Parties", {
+            "fields": (
+                ("trip_id", "timestamp"),
+                ("user", "driver", "tricycle"),
+                ("fare_matrix", "computed_fare", "discount_applied", "actual_fare_charged"),
+            ),
+            "classes": ["tab"],
+        }),
+    )
+
+    def route_map_preview(self, obj):
+        """Renders an interactive Leaflet map decoding polyline_hash or plotting origin -> destination."""
+        has_coords = (
+            obj.origin_lat is not None and obj.origin_lng is not None and
+            obj.dest_lat is not None and obj.dest_lng is not None
+        )
+        if not has_coords and not obj.polyline_hash:
+            return mark_safe(
+                '<div style="padding: 16px; background: #F8FAFC; border: 1px dashed #CBD5E1; border-radius: 8px; color: #64748B; font-style: italic;">'
+                'No GPS coordinates or polyline telemetry recorded for this trip.'
+                '</div>'
+            )
+
+        map_id = f"trip_map_{obj.pk}"
+        poly_json = json.dumps(obj.polyline_hash or "")
+        o_lat = obj.origin_lat if obj.origin_lat is not None else "null"
+        o_lng = obj.origin_lng if obj.origin_lng is not None else "null"
+        d_lat = obj.dest_lat if obj.dest_lat is not None else "null"
+        d_lng = obj.dest_lng if obj.dest_lng is not None else "null"
+        o_addr = json.dumps(obj.origin_address or "Origin")
+        d_addr = json.dumps(obj.destination_address or obj.dest_name or "Destination")
+
+        html = f"""
+        <meta name="referrer" content="strict-origin-when-cross-origin" />
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+        <div style="border: 1px solid #E2E8F0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 8px;">
+            <div style="background: #0F172A; color: #F8FAFC; padding: 10px 16px; font-size: 12px; display: flex; justify-content: space-between; align-items: center;">
+                <span><b>📍 PTRO Official GPS Route Reconstruction</b> — Distance: <b>{obj.total_distance_km:.2f} km</b></span>
+                <span style="display: flex; gap: 14px;">
+                    <span style="color: #4ADE80;">● Pick-up (Origin)</span>
+                    <span style="color: #F87171;">● Drop-off (Destination)</span>
+                    <span style="color: #EF4444;">━━ GPS Polyline Path</span>
+                </span>
+            </div>
+            <div id="{map_id}" style="width: 100%; height: 420px; z-index: 1;"></div>
+        </div>
+
+        <script>
+        (function() {{
+            function decodeGooglePolyline(encoded) {{
+                var points = [];
+                var index = 0, len = encoded.length;
+                var lat = 0, lng = 0;
+                while (index < len) {{
+                    var b, shift = 0, result = 0;
+                    do {{
+                        b = encoded.charCodeAt(index++) - 63;
+                        result |= (b & 0x1f) << shift;
+                        shift += 5;
+                    }} while (b >= 0x20);
+                    var dlat = ((result & 1) !== 0 ? ~(result >> 1) : (result >> 1));
+                    lat += dlat;
+                    shift = 0;
+                    result = 0;
+                    do {{
+                        b = encoded.charCodeAt(index++) - 63;
+                        result |= (b & 0x1f) << shift;
+                        shift += 5;
+                    }} while (b >= 0x20);
+                    var dlng = ((result & 1) !== 0 ? ~(result >> 1) : (result >> 1));
+                    lng += dlng;
+                    points.push([lat / 1e5, lng / 1e5]);
+                }}
+                return points;
+            }}
+
+            function parseRouteCoords(rawPoly) {{
+                if (!rawPoly || typeof rawPoly !== 'string') return [];
+                var trimmed = rawPoly.trim();
+                // 1. Check if JSON array of coordinates or objects
+                if (trimmed.startsWith('[')) {{
+                    try {{
+                        var parsed = JSON.parse(trimmed);
+                        if (Array.isArray(parsed) && parsed.length > 0) {{
+                            return parsed.map(function(pt) {{
+                                if (Array.isArray(pt)) return [parseFloat(pt[0]), parseFloat(pt[1])];
+                                if (pt.latitude !== undefined && pt.longitude !== undefined) return [parseFloat(pt.latitude), parseFloat(pt.longitude)];
+                                if (pt.lat !== undefined && pt.lng !== undefined) return [parseFloat(pt.lat), parseFloat(pt.lng)];
+                                return null;
+                            }}).filter(Boolean);
+                        }}
+                    }} catch (e) {{}}
+                }}
+                // 2. Otherwise decode as Google Encoded Polyline string
+                try {{
+                    return decodeGooglePolyline(trimmed);
+                }} catch (e) {{
+                    return [];
+                }}
+            }}
+
+            function initMap() {{
+                var container = document.getElementById('{map_id}');
+                if (!container || typeof L === 'undefined') {{
+                    setTimeout(initMap, 150);
+                    return;
+                }}
+                if (container._leaflet_id) return; // already initialized
+
+                var defaultCenter = [15.1450, 120.5887]; // Angeles City center fallback
+                var map = L.map('{map_id}').setView(defaultCenter, 14);
+
+                L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                    maxZoom: 19,
+                    attribution: '© OpenStreetMap contributors | Fair PTRO Telemetry'
+                }}).addTo(map);
+
+                var oLat = {o_lat}, oLng = {o_lng};
+                var dLat = {d_lat}, dLng = {d_lng};
+                var rawPoly = {poly_json};
+                var oAddr = {o_addr};
+                var dAddr = {d_addr};
+
+                var routePoints = parseRouteCoords(rawPoly);
+                var boundsPoints = [];
+
+                // Add Origin Marker
+                if (oLat !== null && oLng !== null) {{
+                    var startMarker = L.circleMarker([oLat, oLng], {{
+                        radius: 8, fillColor: '#22C55E', color: '#FFFFFF', weight: 2, fillOpacity: 1
+                    }}).addTo(map).bindPopup('<b>🟢 Pick-up (Origin):</b><br>' + oAddr + '<br><small>' + oLat + ', ' + oLng + '</small>');
+                    boundsPoints.push([oLat, oLng]);
+                }} else if (routePoints.length > 0) {{
+                    L.circleMarker(routePoints[0], {{
+                        radius: 8, fillColor: '#22C55E', color: '#FFFFFF', weight: 2, fillOpacity: 1
+                    }}).addTo(map).bindPopup('<b>🟢 Pick-up (Origin):</b><br>' + oAddr);
+                }}
+
+                // Add Destination Marker
+                if (dLat !== null && dLng !== null) {{
+                    var endMarker = L.circleMarker([dLat, dLng], {{
+                        radius: 8, fillColor: '#EF4444', color: '#FFFFFF', weight: 2, fillOpacity: 1
+                    }}).addTo(map).bindPopup('<b>🔴 Drop-off (Destination):</b><br>' + dAddr + '<br><small>' + dLat + ', ' + dLng + '</small>');
+                    boundsPoints.push([dLat, dLng]);
+                }} else if (routePoints.length > 1) {{
+                    var lastPt = routePoints[routePoints.length - 1];
+                    L.circleMarker(lastPt, {{
+                        radius: 8, fillColor: '#EF4444', color: '#FFFFFF', weight: 2, fillOpacity: 1
+                    }}).addTo(map).bindPopup('<b>🔴 Drop-off (Destination):</b><br>' + dAddr);
+                }}
+
+                // Draw Polyline Path (or fallback line between Origin & Destination)
+                if (routePoints.length > 1) {{
+                    var polyLine = L.polyline(routePoints, {{
+                        color: '#DC2626', weight: 5, opacity: 0.85
+                    }}).addTo(map);
+                    boundsPoints = boundsPoints.concat(routePoints);
+                }} else if (oLat !== null && oLng !== null && dLat !== null && dLng !== null) {{
+                    var directLine = L.polyline([[oLat, oLng], [dLat, dLng]], {{
+                        color: '#DC2626', weight: 4, dashArray: '8, 8', opacity: 0.85
+                    }}).addTo(map);
+                }}
+
+                if (boundsPoints.length > 0) {{
+                    map.fitBounds(boundsPoints, {{ padding: [40, 40] }});
+                }}
+
+                // Fix Leaflet grey tiles when inside Unfold tabs
+                setTimeout(function() {{ map.invalidateSize(); }}, 300);
+                document.addEventListener('click', function() {{
+                    setTimeout(function() {{ map.invalidateSize(); }}, 150);
+                }});
+            }}
+
+            initMap();
+        }})();
+        </script>
+        """
+        return mark_safe(html)
+    route_map_preview.short_description = "Interactive Trip Route Map"
+
+    # --- CSV Receipt Export Action ---
     @admin.action(description="Export Selected Trips as Receipts (CSV)")
     def export_receipts(self, request, queryset):
         response = HttpResponse(content_type='text/csv')
         response['Content-Disposition'] = 'attachment; filename="trip_receipts.csv"'
         
         writer = csv.writer(response)
-        # Write the header row
         writer.writerow([
             'Trip ID', 'Date/Time', 'Status', 'Passenger', 
             'Driver', 'Tricycle Body #', 'Origin', 'Destination',
             'Distance (km)', 'Computed Fare', 'Actual Fare'
         ])
         
-        # Write data rows
         for trip in queryset:
             passenger = trip.user.get_full_name() if trip.user else "Guest/Unknown"
             driver = trip.driver.get_full_name() if trip.driver else "Unknown"
-            # Adjust timestamp formatting to local time timezone automatically handled by Django
             local_time = trip.timestamp.strftime("%Y-%m-%d %I:%M %p") if trip.timestamp else "N/A"
             
             writer.writerow([
@@ -338,7 +555,7 @@ class ReportAdmin(ModelAdmin):
     """Admin interface for the PTRO to investigate and resolve dispute tickets."""
     list_display = ('report_id', 'violation_type', 'get_body_number', 'status', 'evidence_thumbnail', 'filed_at', 'review_action')
     list_display_links = ('report_id', 'violation_type', 'get_body_number')
-    list_filter = ('status', 'violation_type')
+    list_filter = ('status', 'violation_type', 'filed_at')
     search_fields = ('report_id', 'manual_body_number', 'trip__tricycle__body_number')
     radio_fields = {"status": admin.HORIZONTAL}
     
@@ -359,7 +576,11 @@ class ReportAdmin(ModelAdmin):
     
     fieldsets = (
         ("Commuter Complaint (Read-Only)", {
-            "fields": ('report_id', 'user', 'trip', 'manual_body_number', 'violation_type', 'passenger_comments', 'evidence_preview', 'filed_at'),
+            "fields": (
+                'report_id', 'user', 'trip', 'manual_body_number',
+                'violation_type', 'passenger_comments',
+                'evidence_preview', 'trip_route_map', 'filed_at'
+            ),
             "classes": ["tab"],
         }),
         ("PTRO Action Center", {
@@ -374,7 +595,21 @@ class ReportAdmin(ModelAdmin):
         }),
     )
 
-    readonly_fields = ('report_id', 'user', 'trip', 'manual_body_number', 'violation_type', 'passenger_comments', 'evidence_preview', 'filed_at')
+    readonly_fields = (
+        'report_id', 'user', 'trip', 'manual_body_number',
+        'violation_type', 'passenger_comments',
+        'evidence_preview', 'trip_route_map', 'filed_at'
+    )
+
+    def trip_route_map(self, obj):
+        if obj.trip:
+            return TripAdmin(Trip, self.admin_site).route_map_preview(obj.trip)
+        return mark_safe(
+            '<div style="padding: 12px; background-color: #F8FAFC; border-radius: 8px; border: 1px dashed #CBD5E1; color: #64748B; font-style: italic;">'
+            'Manual report (Not linked to an active GPS trip).'
+            '</div>'
+        )
+    trip_route_map.short_description = "Linked Trip GPS Map"
 
     # --- ADDED: CSV Audit Trail Receipt Export Action ---
     @admin.action(description="Export Selected Reports as Audit Receipts (CSV)")
